@@ -1,0 +1,15 @@
+{
+  "name": "ollie-the-ball",
+  "version": "1.0.0",
+  "description": "Adventures of Ollie the Ball: The Lost Coin Hunt — HTML5 remake",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "python3 -m http.server 8080"
+  },
+  "dependencies": {
+    "cannon-es": "^0.20.0",
+    "three": "^0.170.0"
+  }
+}

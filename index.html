@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#1a6fb5" />
+  <meta name="description" content="Adventures of Ollie the Ball: The Lost Coin Hunt — roll, collect coins, and find the door." />
+  <title>Adventures of Ollie the Ball</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/png" href="./icons/favicon.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js",
+      "cannon-es": "./vendor/cannon-es.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="gl"></canvas>
+
+    <div id="vignette"></div>
+
+    <header id="hud" class="hidden" aria-live="polite">
+      <div class="hud-left">
+        <div class="pill" id="hud-level">Level 1</div>
+        <div class="pill coin-pill">
+          <span class="coin-dot" aria-hidden="true"></span>
+          <span id="hud-coins">0 / 0</span>
+        </div>
+      </div>
+      <div class="hud-right">
+        <div class="pill" id="hud-time">0.0</div>
+        <button type="button" id="btn-pause" class="icon-btn" aria-label="Pause">II</button>
+      </div>
+    </header>
+
+    <div id="need-coins" class="toast hidden">You need to find all the coins before you can proceed.</div>
+
+    <div id="touch" class="hidden">
+      <div id="stick" aria-label="Move">
+        <div class="stick-ring"></div>
+        <div class="stick-knob" id="stick-knob"></div>
+      </div>
+      <button type="button" id="btn-jump" aria-label="Jump">JUMP</button>
+    </div>
+
+    <section id="screen-splash" class="screen">
+      <img class="splash-art" src="./assets/images/splash.jpg" alt="Adventures of Ollie the Ball: The Lost Coin Hunt" />
+      <div class="splash-shade"></div>
+      <div class="splash-copy">
+        <button type="button" id="btn-enter" class="btn primary">Tap to Play</button>
+      </div>
+    </section>
+
+    <section id="screen-menu" class="screen hidden">
+      <div class="menu-panel">
+        <p class="kicker">Adventure 1</p>
+        <h1>Ollie the Ball</h1>
+        <p class="tagline">Collect every lost coin, then roll through the glowing door.</p>
+        <nav class="menu-nav">
+          <button type="button" class="btn primary" data-action="play">Play</button>
+          <button type="button" class="btn" data-action="levels">Choose Level</button>
+          <button type="button" class="btn" data-action="controls">Controls</button>
+          <button type="button" class="btn" data-action="credits">Credits</button>
+        </nav>
+      </div>
+    </section>
+
+    <section id="screen-levels" class="screen hidden">
+      <div class="menu-panel wide">
+        <p class="kicker">Select a stage</p>
+        <h2>Choose Level</h2>
+        <div id="level-grid" class="level-grid"></div>
+        <button type="button" class="btn" data-action="menu">Back</button>
+      </div>
+    </section>
+
+    <section id="screen-controls" class="screen hidden">
+      <div class="menu-panel">
+        <p class="kicker">How to play</p>
+        <h2>Controls</h2>
+        <ul class="help-list">
+          <li><strong>Move</strong> — WASD or arrow keys. On a phone, drag the left stick.</li>
+          <li><strong>Jump</strong> — Space, or the Jump button.</li>
+          <li><strong>Look</strong> — drag on the world to orbit the camera.</li>
+          <li><strong>Pause</strong> — Esc, or the pause button.</li>
+          <li><strong>Goal</strong> — pick up every gold coin, then enter the glowing door. Falling off the path sends Ollie back.</li>
+        </ul>
+        <button type="button" class="btn" data-action="menu">Back</button>
+      </div>
+    </section>
+
+    <section id="screen-credits" class="screen hidden">
+      <div class="menu-panel">
+        <p class="kicker">About</p>
+        <h2>Credits</h2>
+        <p class="credits-body">
+          Originally built in Unity 4.5 (2014) as
+          <em>Adventures of Ollie the Ball: The Lost Coin Hunt</em>.
+          This HTML5 edition finishes the unfinished stages, replaces the retired
+          Unity Web Player, and keeps Ollie’s original face, coin-hunt rules, and sound effects.
+        </p>
+        <p class="credits-body">Roll, collect, and bring Ollie home.</p>
+        <button type="button" class="btn" data-action="menu">Back</button>
+      </div>
+    </section>
+
+    <section id="screen-pause" class="screen hidden">
+      <div class="menu-panel compact">
+        <h2>Paused</h2>
+        <label class="setting">Music
+          <input type="range" id="vol-music" min="0" max="1" step="0.05" />
+        </label>
+        <label class="setting">Sound
+          <input type="range" id="vol-sfx" min="0" max="1" step="0.05" />
+        </label>
+        <label class="setting">Graphics
+          <select id="opt-quality">
+            <option value="high">Fantastic</option>
+            <option value="medium">Good</option>
+            <option value="low">Fastest</option>
+          </select>
+        </label>
+        <nav class="menu-nav">
+          <button type="button" class="btn primary" data-action="resume">Resume</button>
+          <button type="button" class="btn" data-action="retry">Retry Level</button>
+          <button type="button" class="btn" data-action="menu">Main Menu</button>
+        </nav>
+      </div>
+    </section>
+
+    <section id="screen-result" class="screen hidden">
+      <div class="menu-panel compact">
+        <h2 id="result-title">You Win!</h2>
+        <p id="result-sub" class="tagline"></p>
+        <nav class="menu-nav" id="result-actions"></nav>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="./js/game.js"></script>
+</body>
+</html>

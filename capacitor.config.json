@@ -1,0 +1,12 @@
+{
+  "appId": "com.netbytegames.ollietheball",
+  "appName": "Ollie the Ball",
+  "webDir": ".",
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#0d2438"
+  }
+}

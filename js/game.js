@@ -1,0 +1,1113 @@
+import * as THREE from "three";
+import * as CANNON from "cannon-es";
+import { GameAudio } from "./audio.js";
+import { LEVELS, SHOWCASE } from "./levels.js";
+
+const BALL_R = 0.45;
+const SAVE_KEY = "ollie-the-ball-v1";
+const STEP = 1 / 60;
+
+const $ = (id) => document.getElementById(id);
+
+function loadSave() {
+  try {
+    return {
+      unlocked: 1,
+      best: {},
+      music: 0.55,
+      sfx: 0.85,
+      quality: "high",
+      ...JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"),
+    };
+  } catch {
+    return { unlocked: 1, best: {}, music: 0.55, sfx: 0.85, quality: "high" };
+  }
+}
+
+function writeSave(s) {
+  localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+}
+
+function v3(a) {
+  return new THREE.Vector3(a[0], a[1], a[2]);
+}
+
+class Input {
+  constructor() {
+    this.keys = new Set();
+    this.move = { x: 0, y: 0 };
+    this.jumpQueued = false;
+    this.look = { dx: 0, dy: 0 };
+    this.pointer = { down: false, x: 0, y: 0, id: null };
+    this.stickTouch = null;
+    window.addEventListener("keydown", (e) => {
+      const k = e.key.toLowerCase();
+      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k) || k === "spacebar") {
+        e.preventDefault();
+      }
+      this.keys.add(k);
+      if (k === " " || k === "spacebar") this.jumpQueued = true;
+    });
+    window.addEventListener("keyup", (e) => this.keys.delete(e.key.toLowerCase()));
+  }
+
+  sampleLook() {
+    const d = { ...this.look };
+    this.look.dx = 0;
+    this.look.dy = 0;
+    return d;
+  }
+
+  axes() {
+    let x = 0;
+    let y = 0;
+    if (this.keys.has("a") || this.keys.has("arrowleft")) x -= 1;
+    if (this.keys.has("d") || this.keys.has("arrowright")) x += 1;
+    if (this.keys.has("s") || this.keys.has("arrowdown")) y -= 1;
+    if (this.keys.has("w") || this.keys.has("arrowup")) y += 1;
+    x += this.move.x;
+    y += this.move.y;
+    const m = Math.hypot(x, y);
+    if (m > 1) {
+      x /= m;
+      y /= m;
+    }
+    return { x, y };
+  }
+}
+
+export class Game {
+  constructor() {
+    this.save = loadSave();
+    this.audio = new GameAudio();
+    this.input = new Input();
+    this.mode = "splash";
+    this.levelIndex = 0;
+    this.paused = false;
+    this.won = false;
+    this.dead = false;
+    this.elapsed = 0;
+    this.found = 0;
+    this.total = 0;
+    this.grounded = false;
+    this.wasGrounded = false;
+    this.coyote = 0;
+    this.needCoinsT = 0;
+    this.padCool = new Map();
+    this.camYaw = 0.6;
+    this.camPitch = 0.42;
+    this.camDist = 9;
+    this.showcaseT = 0;
+    this.rain = null;
+    this.clock = new THREE.Clock();
+    this.acc = 0;
+    this.tmp = new THREE.Vector3();
+    this.fwd = new THREE.Vector3();
+    this.right = new THREE.Vector3();
+    this.ray = new CANNON.Ray();
+    this.rayRes = new CANNON.RaycastResult();
+    this.worldItems = [];
+    this.coins = [];
+    this.boosters = [];
+    this.teleporters = [];
+    this.movers = [];
+    this.hazards = [];
+    this.door = null;
+    this.player = null;
+    this.playerBody = null;
+    this.level = null;
+
+    this.canvas = $("gl");
+    this.renderer = null;
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: "high-performance",
+        failIfMajorPerformanceCaveat: false,
+      });
+      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    } catch (err) {
+      console.error(err);
+      const btn = $("btn-enter");
+      if (btn) btn.textContent = "WebGL required — open in Chrome or Safari";
+    }
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 400);
+    this.camera.position.set(0, 8, 14);
+
+    this.hemi = new THREE.HemisphereLight(0xcfe9ff, 0x3d4a28, 0.9);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(0xfff1c8, 1.35);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 90;
+    this.sun.shadow.camera.left = -35;
+    this.sun.shadow.camera.right = 35;
+    this.sun.shadow.camera.top = 35;
+    this.sun.shadow.camera.bottom = -35;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
+
+    this.world = null;
+    this.ballMat = new CANNON.Material("ball");
+    this.groundMat = new CANNON.Material("ground");
+
+    this.textures = {};
+    this.mats = {};
+    this.geos = {
+      sphere: new THREE.SphereGeometry(BALL_R, 32, 24),
+      coin: new THREE.CylinderGeometry(0.38, 0.38, 0.09, 28),
+      box: new THREE.BoxGeometry(1, 1, 1),
+      cyl: new THREE.CylinderGeometry(1, 1, 1, 12),
+      cone: new THREE.ConeGeometry(1, 1, 10),
+      plane: new THREE.PlaneGeometry(1, 1, 1, 1),
+      torus: new THREE.TorusGeometry(1.15, 0.12, 10, 28),
+    };
+
+    this.bindUI();
+    this.bindPointer();
+    window.addEventListener("resize", () => this.resize());
+    const resumeAudio = () => this.audio.ctx?.resume().catch(() => {});
+    window.addEventListener("pointerdown", resumeAudio);
+    window.addEventListener("keydown", resumeAudio);
+    this.resize();
+    this.applyQuality(this.save.quality);
+  }
+
+  bindUI() {
+    $("btn-enter").addEventListener("click", () => this.enter());
+    document.querySelectorAll("[data-action]").forEach((btn) => {
+      btn.addEventListener("mouseenter", () => this.audio.play("select", { volume: 0.4 }));
+      btn.addEventListener("click", () => {
+        this.audio.play("selectDown", { volume: 0.7 });
+        this.onAction(btn.dataset.action);
+      });
+    });
+    $("btn-pause").addEventListener("click", () => this.setPaused(true));
+    $("btn-jump").addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      this.input.jumpQueued = true;
+    });
+    $("vol-music").value = this.save.music;
+    $("vol-sfx").value = this.save.sfx;
+    $("opt-quality").value = this.save.quality;
+    $("vol-music").addEventListener("input", (e) => {
+      this.save.music = Number(e.target.value);
+      this.audio.setMusic(this.save.music);
+      writeSave(this.save);
+    });
+    $("vol-sfx").addEventListener("input", (e) => {
+      this.save.sfx = Number(e.target.value);
+      this.audio.setSfx(this.save.sfx);
+      writeSave(this.save);
+    });
+    $("opt-quality").addEventListener("change", (e) => {
+      this.save.quality = e.target.value;
+      this.applyQuality(this.save.quality);
+      writeSave(this.save);
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.mode === "play") this.setPaused(!this.paused);
+    });
+  }
+
+  bindPointer() {
+    const stick = $("stick");
+    const knob = $("stick-knob");
+    const setStick = (x, y) => {
+      const r = 36;
+      const m = Math.hypot(x, y) || 1;
+      const s = Math.min(1, m / r);
+      const nx = (x / m) * s;
+      const ny = (y / m) * s;
+      knob.style.transform = `translate(${nx * r}px, ${ny * r}px)`;
+      this.input.move.x = nx;
+      this.input.move.y = -ny;
+    };
+    const resetStick = () => {
+      knob.style.transform = "";
+      this.input.move.x = 0;
+      this.input.move.y = 0;
+      this.input.stickTouch = null;
+    };
+    stick.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      stick.setPointerCapture(e.pointerId);
+      this.input.stickTouch = e.pointerId;
+      const b = stick.getBoundingClientRect();
+      setStick(e.clientX - (b.left + b.width / 2), e.clientY - (b.top + b.height / 2));
+    });
+    stick.addEventListener("pointermove", (e) => {
+      if (this.input.stickTouch !== e.pointerId) return;
+      const b = stick.getBoundingClientRect();
+      setStick(e.clientX - (b.left + b.width / 2), e.clientY - (b.top + b.height / 2));
+    });
+    stick.addEventListener("pointerup", resetStick);
+    stick.addEventListener("pointercancel", resetStick);
+
+    this.canvas.addEventListener("pointerdown", (e) => {
+      if (e.target.closest && e.target.closest("#touch")) return;
+      this.input.pointer.down = true;
+      this.input.pointer.x = e.clientX;
+      this.input.pointer.y = e.clientY;
+      this.input.pointer.id = e.pointerId;
+      this.canvas.setPointerCapture(e.pointerId);
+    });
+    this.canvas.addEventListener("pointermove", (e) => {
+      if (!this.input.pointer.down || this.input.pointer.id !== e.pointerId) return;
+      this.input.look.dx += e.clientX - this.input.pointer.x;
+      this.input.look.dy += e.clientY - this.input.pointer.y;
+      this.input.pointer.x = e.clientX;
+      this.input.pointer.y = e.clientY;
+    });
+    const up = () => {
+      this.input.pointer.down = false;
+    };
+    this.canvas.addEventListener("pointerup", up);
+    this.canvas.addEventListener("pointercancel", up);
+    this.canvas.addEventListener("wheel", (e) => {
+      this.camDist = THREE.MathUtils.clamp(this.camDist + e.deltaY * 0.01, 6, 16);
+    }, { passive: true });
+  }
+
+  applyQuality(q) {
+    if (!this.renderer) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (q === "high") {
+      this.renderer.setPixelRatio(Math.min(2, dpr));
+      this.renderer.shadowMap.enabled = true;
+      this.sun.castShadow = true;
+      this.sun.shadow.mapSize.set(2048, 2048);
+    } else if (q === "medium") {
+      this.renderer.setPixelRatio(Math.min(1.25, dpr));
+      this.renderer.shadowMap.enabled = true;
+      this.sun.castShadow = true;
+      this.sun.shadow.mapSize.set(1024, 1024);
+    } else {
+      this.renderer.setPixelRatio(1);
+      this.renderer.shadowMap.enabled = false;
+      this.sun.castShadow = false;
+    }
+    this.resize();
+  }
+
+  resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.camera.aspect = w / Math.max(1, h);
+    this.camera.updateProjectionMatrix();
+    this.renderer?.setSize(w, h, false);
+  }
+
+  async loadTextures() {
+    const loader = new THREE.TextureLoader();
+    const names = ["ollie", "grass", "wood", "stone", "sand", "brick", "forest", "crate"];
+    const files = {
+      ollie: "assets/textures/ollie.png",
+      grass: "assets/textures/grass.jpg",
+      wood: "assets/textures/wood.jpg",
+      stone: "assets/textures/stone.jpg",
+      sand: "assets/textures/sand.jpg",
+      brick: "assets/textures/brick.jpg",
+      forest: "assets/textures/forest.jpg",
+      crate: "assets/textures/crate.jpg",
+    };
+    await Promise.all(names.map((n) => new Promise((resolve) => {
+      loader.load(files[n], (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 8;
+        if (n !== "ollie") {
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        }
+        this.textures[n] = t;
+        resolve();
+      }, undefined, () => resolve());
+    })));
+    const mk = (map, color, rough = 0.86, metal = 0.04) =>
+      new THREE.MeshStandardMaterial({ map: map || null, color, roughness: rough, metalness: metal });
+    this.mats.grass = mk(this.textures.grass, 0xffffff);
+    this.mats.wood = mk(this.textures.wood, 0xffffff, 0.8, 0.02);
+    this.mats.stone = mk(this.textures.stone, 0xffffff, 0.9, 0.08);
+    this.mats.sand = mk(this.textures.sand, 0xffffff, 0.95, 0);
+    this.mats.brick = mk(this.textures.brick, 0xffffff, 0.88, 0.02);
+    this.mats.forest = mk(this.textures.forest, 0xffffff);
+    this.mats.crate = mk(this.textures.crate, 0xffffff, 0.82, 0.02);
+    this.mats.ollie = new THREE.MeshStandardMaterial({
+      map: this.textures.ollie,
+      roughness: 0.32,
+      metalness: 0.08,
+      emissive: 0x332200,
+      emissiveIntensity: 0.12,
+    });
+    this.mats.gold = new THREE.MeshStandardMaterial({
+      color: 0xffd24a,
+      roughness: 0.28,
+      metalness: 0.85,
+      emissive: 0x553300,
+      emissiveIntensity: 0.35,
+    });
+    this.mats.leaf = new THREE.MeshStandardMaterial({ color: 0x2f8a3a, roughness: 0.9 });
+    this.mats.bark = new THREE.MeshStandardMaterial({ color: 0x6a3d1a, roughness: 0.95 });
+    this.mats.water = new THREE.MeshStandardMaterial({
+      color: 0x1d6aa5,
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.15,
+      metalness: 0.2,
+    });
+    this.mats.speed = new THREE.MeshStandardMaterial({
+      color: 0x3de0ff,
+      emissive: 0x1288aa,
+      emissiveIntensity: 0.8,
+      roughness: 0.4,
+    });
+    this.mats.jump = new THREE.MeshStandardMaterial({
+      color: 0xff4ec8,
+      emissive: 0x881166,
+      emissiveIntensity: 0.8,
+      roughness: 0.4,
+    });
+    this.mats.portal = new THREE.MeshStandardMaterial({
+      color: 0x66f0ff,
+      emissive: 0x22c4ff,
+      emissiveIntensity: 1.2,
+      roughness: 0.25,
+      metalness: 0.4,
+    });
+    this.mats.roof = new THREE.MeshStandardMaterial({ color: 0x8a3a28, roughness: 0.85 });
+  }
+
+  newPhysics() {
+    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -26, 0) });
+    world.broadphase = new CANNON.SAPBroadphase(world);
+    world.allowSleep = true;
+    world.defaultContactMaterial.friction = 0.45;
+    world.defaultContactMaterial.restitution = 0.18;
+    world.addContactMaterial(new CANNON.ContactMaterial(this.ballMat, this.groundMat, {
+      friction: 0.7,
+      restitution: 0.16,
+    }));
+    return world;
+  }
+
+  clearWorld() {
+    if (this.world) {
+      this.world.bodies.slice().forEach((b) => this.world.removeBody(b));
+    }
+    this.worldItems.forEach((o) => {
+      this.scene.remove(o);
+      o.traverse?.((ch) => {
+        if (ch.geometry && ch.geometry !== this.geos.sphere && !Object.values(this.geos).includes(ch.geometry)) {
+          ch.geometry.dispose?.();
+        }
+      });
+    });
+    this.worldItems = [];
+    this.coins = [];
+    this.boosters = [];
+    this.teleporters = [];
+    this.movers = [];
+    this.hazards = [];
+    this.door = null;
+    this.player = null;
+    this.playerBody = null;
+    if (this.rain) {
+      this.scene.remove(this.rain);
+      this.rain.geometry.dispose();
+      this.rain = null;
+    }
+  }
+
+  addMesh(mesh, body) {
+    this.scene.add(mesh);
+    this.worldItems.push(mesh);
+    if (body) {
+      mesh.userData.body = body;
+      this.world.addBody(body);
+    }
+    return mesh;
+  }
+
+  boxMesh(size, matName, pos, { kinematic = false, visible = true } = {}) {
+    const mesh = new THREE.Mesh(this.geos.box, this.tiledMat(matName, size));
+    mesh.scale.set(size[0], size[1], size[2]);
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.visible = visible;
+    const shape = new CANNON.Box(new CANNON.Vec3(size[0] / 2, size[1] / 2, size[2] / 2));
+    const body = new CANNON.Body({
+      mass: 0,
+      material: this.groundMat,
+      type: kinematic ? CANNON.Body.KINEMATIC : CANNON.Body.STATIC,
+      shape,
+      position: new CANNON.Vec3(pos[0], pos[1], pos[2]),
+    });
+    this.addMesh(mesh, body);
+    return { mesh, body };
+  }
+
+  tiledMat(name, size) {
+    const base = this.mats[name] || this.mats.grass;
+    const mat = base.clone();
+    if (mat.map) {
+      mat.map = mat.map.clone();
+      mat.map.needsUpdate = true;
+      mat.map.wrapS = mat.map.wrapT = THREE.RepeatWrapping;
+      const u = Math.max(1, size[0] / 4);
+      const v = Math.max(1, size[2] / 4);
+      mat.map.repeat.set(u, v);
+    }
+    return mat;
+  }
+
+  buildLevel(level, { showcase = false } = {}) {
+    this.clearWorld();
+    this.world = this.newPhysics();
+    this.level = level;
+    this.scene.background = new THREE.Color(level.sky);
+    this.scene.fog = new THREE.Fog(level.fog, 28, 110);
+    this.hemi.color.set(level.sky);
+    this.sun.position.set(18, 28, 10);
+    this.sun.target.position.set(20, 0, 0);
+
+    for (const plat of level.platforms || []) this.boxMesh(plat.size, plat.mat, plat.pos);
+    for (const w of level.walls || []) this.boxMesh(w.size, w.mat, w.pos);
+
+    if (level.water) {
+      const water = new THREE.Mesh(this.geos.plane, this.mats.water);
+      water.rotation.x = -Math.PI / 2;
+      water.scale.set(level.water.size, level.water.size, 1);
+      water.position.set(20, level.water.y, 0);
+      this.addMesh(water);
+    }
+
+    for (const m of level.movers || []) {
+      const built = this.boxMesh(m.size, m.mat, m.pos, { kinematic: true });
+      this.movers.push({
+        ...m,
+        mesh: built.mesh,
+        body: built.body,
+        dir: 1,
+        waiting: false,
+        waitLeft: 0,
+        origin: m.pos.slice(),
+      });
+    }
+
+    for (const c of level.coins || []) {
+      const mesh = new THREE.Mesh(this.geos.coin, this.mats.gold);
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.set(c[0], c[1], c[2]);
+      mesh.castShadow = true;
+      this.addMesh(mesh);
+      this.coins.push({ mesh, pos: c.slice(), taken: false });
+    }
+
+    for (const b of level.boosters || []) {
+      const mesh = new THREE.Mesh(this.geos.box, b.type === "speed" ? this.mats.speed : this.mats.jump);
+      mesh.scale.set(1.8, 0.12, 1.8);
+      mesh.position.set(b.pos[0], b.pos[1], b.pos[2]);
+      this.addMesh(mesh);
+      this.boosters.push({ ...b, mesh, armed: true });
+    }
+
+    for (const t of level.teleporters || []) {
+      this.teleporters.push({
+        from: t.from,
+        to: t.to,
+        ringA: this.makeRing(t.from),
+        ringB: this.makeRing(t.to, true),
+        cool: 0,
+      });
+    }
+
+    if (level.door) this.door = this.makeDoor(level.door);
+
+    for (const d of level.decor || []) this.makeDecor(d);
+    for (const h of level.hazards || []) this.hazards.push(h);
+    if (level.waterfall) this.makeWaterfall(level.waterfall.pos);
+    if (level.rain) this.makeRain();
+
+    this.spawnPlayer(level.spawn, { kinematic: showcase });
+    this.found = 0;
+    this.total = this.coins.filter((c) => !c.taken).length;
+    this.elapsed = 0;
+    this.won = false;
+    this.dead = false;
+    this.camYaw = 0.55;
+    this.camPitch = 0.42;
+  }
+
+  makeRing(pos, dim = false) {
+    const g = new THREE.Group();
+    const torus = new THREE.Mesh(this.geos.torus, this.mats.portal);
+    torus.rotation.x = Math.PI / 2;
+    g.add(torus);
+    g.position.set(pos[0], pos[1], pos[2]);
+    g.scale.setScalar(dim ? 0.85 : 1);
+    const light = new THREE.PointLight(0x66f0ff, 1.4, 8);
+    g.add(light);
+    this.addMesh(g);
+    return g;
+  }
+
+  makeDoor(pos) {
+    const g = new THREE.Group();
+    const matStone = this.mats.stone;
+    const colL = new THREE.Mesh(this.geos.box, matStone);
+    colL.scale.set(0.55, 3.2, 0.55);
+    colL.position.set(-1.1, 0.2, 0);
+    const colR = colL.clone();
+    colR.position.x = 1.1;
+    const lintel = new THREE.Mesh(this.geos.box, matStone);
+    lintel.scale.set(2.8, 0.45, 0.6);
+    lintel.position.set(0, 1.85, 0);
+    const gate = new THREE.Mesh(this.geos.torus, this.mats.portal);
+    gate.scale.set(1.05, 1.25, 1);
+    const swirl = new THREE.Mesh(
+      new THREE.CircleGeometry(1.05, 24),
+      new THREE.MeshBasicMaterial({ color: 0x8cf4ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide }),
+    );
+    swirl.position.z = 0.05;
+    g.add(colL, colR, lintel, gate, swirl);
+    g.position.set(pos[0], pos[1], pos[2]);
+    const light = new THREE.PointLight(0xffef8a, 2.2, 12);
+    light.position.set(0, 1, 0.4);
+    g.add(light);
+    g.userData.swirl = swirl;
+    g.userData.gate = gate;
+    this.addMesh(g);
+    colL.castShadow = colR.castShadow = true;
+    return g;
+  }
+
+  makeDecor(d) {
+    const g = new THREE.Group();
+    g.position.set(d.pos[0], d.pos[1], d.pos[2]);
+    if (d.type === "tree") {
+      const trunk = new THREE.Mesh(this.geos.cyl, this.mats.bark);
+      trunk.scale.set(0.28, 1.6, 0.28);
+      trunk.position.y = 0.8;
+      const leaf = new THREE.Mesh(this.geos.cone, this.mats.leaf);
+      leaf.scale.set(1.4, 2.4, 1.4);
+      leaf.position.y = 2.4;
+      const leaf2 = leaf.clone();
+      leaf2.scale.set(1.1, 1.8, 1.1);
+      leaf2.position.y = 3.3;
+      g.add(trunk, leaf, leaf2);
+      this.boxMesh([0.8, 3.2, 0.8], "wood", [d.pos[0], d.pos[1] + 1.4, d.pos[2]], { visible: false });
+    } else if (d.type === "crate") {
+      const m = new THREE.Mesh(this.geos.box, this.mats.crate);
+      m.scale.set(1.1, 1.1, 1.1);
+      g.add(m);
+      this.boxMesh([1.1, 1.1, 1.1], "crate", [d.pos[0], d.pos[1], d.pos[2]]);
+      return;
+    } else if (d.type === "barrel") {
+      const m = new THREE.Mesh(this.geos.cyl, this.mats.wood);
+      m.scale.set(0.5, 1.1, 0.5);
+      g.add(m);
+      this.boxMesh([0.9, 1.1, 0.9], "wood", d.pos);
+      return;
+    } else if (d.type === "house") {
+      const body = new THREE.Mesh(this.geos.box, this.mats.brick);
+      body.scale.set(4.2, 3.2, 3.4);
+      body.position.y = 1.4;
+      const roof = new THREE.Mesh(this.geos.cone, this.mats.roof);
+      roof.scale.set(3.4, 2.2, 3.4);
+      roof.position.y = 4.1;
+      g.add(body, roof);
+      this.boxMesh([4.2, 3.2, 3.4], "brick", [d.pos[0], d.pos[1] + 1.4, d.pos[2]], { visible: false });
+    } else if (d.type === "buoy") {
+      const s = new THREE.Mesh(this.geos.sphere, this.mats.jump);
+      s.scale.set(0.7, 0.7, 0.7);
+      const pole = new THREE.Mesh(this.geos.cyl, this.mats.wood);
+      pole.scale.set(0.08, 1.4, 0.08);
+      pole.position.y = 0.8;
+      g.add(s, pole);
+    } else if (d.type === "well") {
+      const ring = new THREE.Mesh(this.geos.cyl, this.mats.stone);
+      ring.scale.set(1.3, 0.5, 1.3);
+      const hole = new THREE.Mesh(this.geos.cyl, new THREE.MeshBasicMaterial({ color: 0x111111 }));
+      hole.scale.set(0.85, 0.52, 0.85);
+      g.add(ring, hole);
+    }
+    g.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    this.addMesh(g);
+  }
+
+  makeWaterfall(pos) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xa8e7ff,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.2,
+    });
+    const sheet = new THREE.Mesh(this.geos.box, mat);
+    sheet.scale.set(4, 8, 0.4);
+    sheet.position.set(pos[0], pos[1], pos[2]);
+    this.addMesh(sheet);
+  }
+
+  makeRain() {
+    const count = 900;
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = Math.random() * 80 - 10;
+      pos[i * 3 + 1] = Math.random() * 30;
+      pos[i * 3 + 2] = Math.random() * 40 - 20;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    this.rain = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xb9d7ee,
+      size: 0.08,
+      transparent: true,
+      opacity: 0.7,
+    }));
+    this.scene.add(this.rain);
+    this.worldItems.push(this.rain);
+  }
+
+  spawnPlayer(pos, { kinematic = false } = {}) {
+    const mesh = new THREE.Mesh(this.geos.sphere, this.mats.ollie);
+    mesh.castShadow = true;
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    const body = new CANNON.Body({
+      mass: kinematic ? 0 : 1.25,
+      type: kinematic ? CANNON.Body.KINEMATIC : CANNON.Body.DYNAMIC,
+      shape: new CANNON.Sphere(BALL_R),
+      material: this.ballMat,
+      position: new CANNON.Vec3(pos[0], pos[1], pos[2]),
+      linearDamping: 0.26,
+      angularDamping: 0.4,
+      allowSleep: false,
+    });
+    this.addMesh(mesh, body);
+    this.player = mesh;
+    this.playerBody = body;
+  }
+
+  async enter() {
+    if (!this.renderer) return;
+    await this.audio.unlock();
+    this.audio.setMusic(this.save.music);
+    this.audio.setSfx(this.save.sfx);
+    if (!this.textures.ollie) await this.loadTextures();
+    this.showScreen("menu");
+    this.buildLevel(SHOWCASE, { showcase: true });
+    this.mode = "menu";
+    this.audio.startMusic("day");
+  }
+
+  showScreen(name) {
+    ["splash", "menu", "levels", "controls", "credits", "pause", "result"].forEach((n) => {
+      $(`screen-${n}`).classList.toggle("hidden", n !== name);
+    });
+    const playing = name === null;
+    $("hud").classList.toggle("hidden", !playing);
+    const touch = window.matchMedia("(pointer: coarse)").matches;
+    $("touch").classList.toggle("hidden", !(playing && touch));
+  }
+
+  onAction(action) {
+    if (action === "play") this.startLevel(0);
+    if (action === "levels") {
+      this.renderLevelGrid();
+      this.showScreen("levels");
+    }
+    if (action === "controls") this.showScreen("controls");
+    if (action === "credits") this.showScreen("credits");
+    if (action === "menu") this.goMenu();
+    if (action === "resume") this.setPaused(false);
+    if (action === "retry") this.startLevel(this.levelIndex);
+  }
+
+  renderLevelGrid() {
+    const grid = $("level-grid");
+    grid.innerHTML = "";
+    LEVELS.forEach((lv, i) => {
+      const locked = i + 1 > this.save.unlocked;
+      const btn = document.createElement("button");
+      btn.className = "level-card";
+      btn.disabled = locked;
+      const best = this.save.best[lv.id];
+      btn.innerHTML = `<div class="num">${lv.name}</div><div>${locked ? "Locked" : lv.title}</div>
+        <div class="best">${best ? `Best ${best.toFixed(1)}s` : locked ? "Clear earlier stages" : "No time yet"}</div>`;
+      btn.addEventListener("click", () => {
+        if (!locked) this.startLevel(i);
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  goMenu() {
+    this.paused = false;
+    this.mode = "menu";
+    this.showScreen("menu");
+    this.buildLevel(SHOWCASE, { showcase: true });
+    this.audio.startMusic("day");
+  }
+
+  startLevel(index) {
+    this.levelIndex = index;
+    const lv = LEVELS[index];
+    this.paused = false;
+    this.mode = "play";
+    this.showScreen(null);
+    this.buildLevel(lv);
+    $("hud-level").textContent = `${lv.name} · ${lv.title}`;
+    this.updateCoinsHud();
+    this.audio.startMusic(lv.theme);
+    if (lv.hint) this.flashNeed(lv.hint, 3.2);
+  }
+
+  setPaused(p) {
+    if (this.mode !== "play" || this.won || this.dead) return;
+    this.paused = p;
+    if (p) this.showScreen("pause");
+    else this.showScreen(null);
+  }
+
+  updateCoinsHud() {
+    $("hud-coins").textContent = `${this.found} / ${this.total}`;
+  }
+
+  flashNeed(text, dur = 3) {
+    const el = $("need-coins");
+    el.textContent = text;
+    el.classList.remove("hidden");
+    this.needCoinsT = dur;
+  }
+
+  groundedNow() {
+    if (!this.playerBody) return false;
+    this.rayRes.reset();
+    const p = this.playerBody.position;
+    this.ray.from.set(p.x, p.y - BALL_R - 0.02, p.z);
+    this.ray.to.set(p.x, p.y - BALL_R - 0.22, p.z);
+    this.world.raycastClosest(this.ray.from, this.ray.to, { skipBackfaces: true }, this.rayRes);
+    return this.rayRes.hasHit && this.rayRes.body !== this.playerBody;
+  }
+
+  physics(dt) {
+    if (!this.playerBody || this.mode !== "play" || this.paused || this.won || this.dead) {
+      if (this.mode === "menu") this.world?.step(dt);
+      return;
+    }
+
+    this.updateMovers(dt);
+
+    const axes = this.input.axes();
+    this.fwd.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.camYaw);
+    this.fwd.y = 0;
+    this.fwd.normalize();
+    this.right.crossVectors(this.fwd, new THREE.Vector3(0, 1, 0)).normalize();
+
+    this.grounded = this.groundedNow();
+    if (this.grounded) this.coyote = 0.1;
+    else this.coyote -= dt;
+
+    const force = this.grounded ? 28 : 13;
+    const fx = this.fwd.x * axes.y * force + this.right.x * axes.x * force;
+    const fz = this.fwd.z * axes.y * force + this.right.z * axes.x * force;
+    this.playerBody.applyForce(new CANNON.Vec3(fx, 0, fz), this.playerBody.position);
+
+    if (this.input.jumpQueued) {
+      this.input.jumpQueued = false;
+      if (this.coyote > 0) {
+        this.playerBody.velocity.y = 9.6;
+        this.coyote = 0;
+        this.audio.play("jump", { volume: 0.8 });
+      }
+    }
+
+    if (this.grounded && !this.wasGrounded) this.audio.play("hit", { volume: 0.35 });
+    this.wasGrounded = this.grounded;
+
+    this.world.step(dt);
+
+    this.collect();
+    this.touchPads(dt);
+    this.checkDoor();
+    this.checkDeath();
+    this.elapsed += dt;
+  }
+
+  updateMovers(dt) {
+    for (const m of this.movers) {
+      if (m.waiting) {
+        m.waitLeft -= dt;
+        m.body.velocity.set(0, 0, 0);
+        if (m.waitLeft <= 0) {
+          m.waiting = false;
+          m.dir *= -1;
+        }
+        continue;
+      }
+      const axis = m.axis;
+      const idx = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+      const pos = m.body.position;
+      const val = pos[axis];
+      if (val >= m.max) {
+        pos[axis] = m.max;
+        m.waiting = true;
+        m.waitLeft = m.wait;
+        m.body.velocity.set(0, 0, 0);
+      } else if (val <= m.min) {
+        pos[axis] = m.min;
+        m.waiting = true;
+        m.waitLeft = m.wait;
+        m.body.velocity.set(0, 0, 0);
+      } else {
+        const v = m.dir * m.speed;
+        m.body.velocity.set(idx === 0 ? v : 0, idx === 1 ? v : 0, idx === 2 ? v : 0);
+      }
+    }
+  }
+
+  collect() {
+    const p = this.playerBody.position;
+    for (const c of this.coins) {
+      if (c.taken) continue;
+      const d = Math.hypot(p.x - c.pos[0], p.y - c.pos[1], p.z - c.pos[2]);
+      if (d < 0.95) {
+        c.taken = true;
+        c.mesh.visible = false;
+        this.found++;
+        this.audio.play("coin", { volume: 0.9, playbackRate: 0.95 + Math.random() * 0.1 });
+        this.updateCoinsHud();
+      }
+    }
+  }
+
+  touchPads(dt) {
+    const p = this.playerBody.position;
+    for (const [k, t] of this.padCool) this.padCool.set(k, t - dt);
+    this.boosters.forEach((b, i) => {
+      const d = Math.hypot(p.x - b.pos[0], p.z - b.pos[2]);
+      const yok = Math.abs(p.y - b.pos[1]) < 1.2;
+      if (d < 1.15 && yok && (this.padCool.get("b" + i) || 0) <= 0) {
+        this.padCool.set("b" + i, 0.85);
+        if (b.type === "speed") {
+          this.playerBody.velocity.x += b.dir[0] * b.force * 0.55;
+          this.playerBody.velocity.y += (b.dir[1] || 0) * b.force * 0.35;
+          this.playerBody.velocity.z += b.dir[2] * b.force * 0.55;
+          this.audio.play("speedBooster");
+        } else {
+          this.playerBody.velocity.y = Math.max(this.playerBody.velocity.y, b.force);
+          this.audio.play("jumpBooster");
+        }
+      }
+    });
+    for (const t of this.teleporters) {
+      t.cool -= dt;
+      const d = Math.hypot(p.x - t.from[0], p.y - t.from[1], p.z - t.from[2]);
+      if (d < 1.2 && t.cool <= 0) {
+        this.playerBody.position.set(t.to[0], t.to[1], t.to[2]);
+        this.playerBody.velocity.set(0, 0, 0);
+        this.playerBody.angularVelocity.set(0, 0, 0);
+        t.cool = 1.2;
+        this.audio.play("teleporter");
+      }
+    }
+  }
+
+  checkDoor() {
+    if (!this.door || this.won) return;
+    const p = this.playerBody.position;
+    const d = this.door.position;
+    if (Math.hypot(p.x - d.x, p.z - d.z) < 1.55 && Math.abs(p.y - d.y) < 2.2) {
+      if (this.found >= this.total) this.win();
+      else if (this.needCoinsT <= 0) this.flashNeed("You need to find all the coins before you can proceed.");
+    }
+  }
+
+  checkDeath() {
+    const p = this.playerBody.position;
+    if (p.y < (this.level.killY ?? -8)) {
+      this.die();
+      return;
+    }
+    if (this.level.water && p.y < this.level.water.y + 0.35) {
+      this.die();
+      return;
+    }
+    for (const h of this.hazards) {
+      if (Math.abs(p.x - h.pos[0]) < h.size[0] / 2 && Math.abs(p.z - h.pos[2]) < h.size[2] / 2 && p.y < h.pos[1] + 1.2) {
+        this.die();
+        return;
+      }
+    }
+  }
+
+  win() {
+    this.won = true;
+    this.audio.play("won");
+    this.audio.stopMusic();
+    const t = this.elapsed;
+    const prev = this.save.best[this.level.id];
+    if (!prev || t < prev) this.save.best[this.level.id] = t;
+    this.save.unlocked = Math.max(this.save.unlocked, this.level.id + 1);
+    writeSave(this.save);
+    $("result-title").textContent = "You Win!";
+    $("result-sub").textContent = `${this.level.title} cleared in ${t.toFixed(1)}s`;
+    const nav = $("result-actions");
+    nav.innerHTML = "";
+    const next = this.levelIndex + 1 < LEVELS.length;
+    if (next) {
+      const b = document.createElement("button");
+      b.className = "btn primary";
+      b.textContent = "Proceed to Next Level";
+      b.addEventListener("click", () => this.startLevel(this.levelIndex + 1));
+      nav.appendChild(b);
+    }
+    const again = document.createElement("button");
+    again.className = "btn";
+    again.textContent = next ? "Replay" : "Play Again";
+    again.addEventListener("click", () => this.startLevel(this.levelIndex));
+    nav.appendChild(again);
+    const menu = document.createElement("button");
+    menu.className = "btn";
+    menu.textContent = "Main Menu";
+    menu.addEventListener("click", () => this.goMenu());
+    nav.appendChild(menu);
+    this.showScreen("result");
+  }
+
+  die() {
+    if (this.dead || this.won) return;
+    this.dead = true;
+    this.audio.play("destroy");
+    this.audio.play("gameover", { volume: 0.7 });
+    $("result-title").textContent = "Ollie is Dead!";
+    $("result-sub").textContent = "The coins are still out there.";
+    const nav = $("result-actions");
+    nav.innerHTML = "";
+    const again = document.createElement("button");
+    again.className = "btn primary";
+    again.textContent = "Try Level Again";
+    again.addEventListener("click", () => this.startLevel(this.levelIndex));
+    nav.appendChild(again);
+    const menu = document.createElement("button");
+    menu.className = "btn";
+    menu.textContent = "Main Menu";
+    menu.addEventListener("click", () => this.goMenu());
+    nav.appendChild(menu);
+    this.showScreen("result");
+  }
+
+  syncMeshes() {
+    for (const o of this.worldItems) {
+      const b = o.userData.body;
+      if (!b) continue;
+      o.position.set(b.position.x, b.position.y, b.position.z);
+      o.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+    }
+  }
+
+  updateCamera(dt) {
+    const look = this.input.sampleLook();
+    this.camYaw -= look.dx * 0.0055;
+    this.camPitch = THREE.MathUtils.clamp(this.camPitch + look.dy * 0.004, 0.12, 1.15);
+
+    if (this.mode === "menu") {
+      this.showcaseT += dt;
+      this.camYaw = this.showcaseT * 0.22;
+      this.camPitch = 0.4;
+      this.camDist = 12;
+    }
+
+    const target = this.player ? this.player.position : new THREE.Vector3();
+    const cp = Math.cos(this.camPitch);
+    const ox = Math.sin(this.camYaw) * cp * this.camDist;
+    const oz = Math.cos(this.camYaw) * cp * this.camDist;
+    const oy = Math.sin(this.camPitch) * this.camDist + 1.2;
+    const desired = this.tmp.set(target.x + ox, target.y + oy, target.z + oz);
+    this.camera.position.lerp(desired, this.mode === "menu" ? 0.04 : 0.12);
+    this.camera.lookAt(target.x, target.y + 0.6, target.z);
+    this.sun.position.set(target.x + 16, target.y + 26, target.z + 10);
+    this.sun.target.position.copy(target);
+    this.sun.target.updateMatrixWorld();
+  }
+
+  animateVisuals(t, dt) {
+    for (const c of this.coins) {
+      if (c.taken) continue;
+      c.mesh.rotation.z = t * 2.4;
+      c.mesh.position.y = c.pos[1] + Math.sin(t * 3 + c.pos[0]) * 0.12;
+    }
+    if (this.door) {
+      const pulse = 0.9 + Math.sin(t * 3) * 0.08;
+      this.door.userData.gate.scale.set(pulse, pulse * 1.15, pulse);
+      this.door.userData.swirl.rotation.z = t * 1.5;
+      this.door.userData.swirl.material.opacity = this.found >= this.total ? 0.7 : 0.28;
+    }
+    for (const tp of this.teleporters) {
+      tp.ringA.rotation.y = t * 1.6;
+      tp.ringB.rotation.y = -t * 1.6;
+    }
+    if (this.rain) {
+      const arr = this.rain.geometry.attributes.position.array;
+      for (let i = 0; i < arr.length; i += 3) {
+        arr[i + 1] -= dt * 18;
+        if (arr[i + 1] < 0) arr[i + 1] = 22;
+      }
+      this.rain.geometry.attributes.position.needsUpdate = true;
+    }
+    if (this.mode === "menu" && this.playerBody) {
+      this.playerBody.position.set(Math.sin(t * 0.4) * 4, 1.2, Math.cos(t * 0.35) * 4);
+      this.player.position.copy(this.playerBody.position);
+      this.player.rotation.z = t * 1.5;
+      this.player.rotation.x = t * 0.8;
+    }
+    if (this.needCoinsT > 0) {
+      this.needCoinsT -= dt;
+      if (this.needCoinsT <= 0) $("need-coins").classList.add("hidden");
+    }
+  }
+
+  loop = () => {
+    const dt = Math.min(0.05, this.clock.getDelta());
+    this.acc += dt;
+    while (this.acc >= STEP) {
+      this.physics(STEP);
+      this.acc -= STEP;
+    }
+    if (this.mode === "play" && !this.paused && !this.won && !this.dead) this.syncMeshes();
+    else if (this.mode === "menu") this.syncMeshes();
+    this.updateCamera(dt);
+    this.animateVisuals(this.clock.elapsedTime, dt);
+    if (this.mode === "play" && !this.paused) $("hud-time").textContent = this.elapsed.toFixed(1);
+    this.renderer?.render(this.scene, this.camera);
+    requestAnimationFrame(this.loop);
+  };
+
+  start() {
+    this.loop();
+  }
+}
+
+const game = new Game();
+game.start();
+window.OllieGame = game;
+{
+  const params = new URLSearchParams(location.search);
+  const play = params.get("play");
+  if (play) {
+    game.enter().then(() => {
+      const n = Number(play);
+      if (Number.isFinite(n) && n >= 1) game.startLevel(Math.min(LEVELS.length, Math.max(1, n)) - 1);
+    }).catch((err) => console.error(err));
+  }
+}
