@@ -1,0 +1,14 @@
+{
+  "name": "Adventures of Ollie the Ball: The Lost Coin Hunt",
+  "short_name": "Ollie the Ball",
+  "description": "Roll Ollie, collect every lost coin, and find the glowing door.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a6fb5",
+  "theme_color": "#1a6fb5",
+  "orientation": "landscape",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

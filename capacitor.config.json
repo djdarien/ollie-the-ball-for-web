@@ -1,12 +1,26 @@
 {
   "appId": "com.netbytegames.ollietheball",
   "appName": "Ollie the Ball",
-  "webDir": ".",
+  "webDir": "www",
   "server": {
     "androidScheme": "https"
   },
   "ios": {
-    "contentInset": "automatic",
-    "backgroundColor": "#0d2438"
+    "contentInset": "never",
+    "backgroundColor": "#0d2438",
+    "preferredContentMode": "mobile",
+    "scheme": "Ollie the Ball"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 900,
+      "launchAutoHide": true,
+      "backgroundColor": "#1a6fb5",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0d2438"
+    }
   }
 }

@@ -27,6 +27,10 @@ Do not open `index.html` as a file URL. ES modules need a local server.
 
 Goal: collect **all** coins, then roll into the door. Falling off the path (or into water / the well) retries the level.
 
+### Unlock all levels (QA)
+
+Type **`ollie`** anywhere, or enter it in the **Level code** box on Choose Level. That unlocks every stage and saves in this browser. `?unlock=1` on the URL does the same.
+
 ## What this edition finishes
 
 - 8 complete stages (the Unity project had several unfinished scenes)
