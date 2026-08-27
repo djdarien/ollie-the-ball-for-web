@@ -1,7 +1,7 @@
 {
-  "name": "ollie-the-ball",
+  "name": "adventures-of-ollie-the-ball",
   "version": "1.0.0",
-  "description": "Adventures of Ollie the Ball: The Lost Coin Hunt — HTML5 remake",
+  "description": "Adventures of Ollie The Ball: The Lost Coin Hunt. Inspired by Rolie Polie Olie. Ollie awoke one morning to all of his coins lost and scattered about the universe — roll over every coin in each level.",
   "private": true,
   "type": "module",
   "scripts": {

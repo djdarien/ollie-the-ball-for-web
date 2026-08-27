@@ -105,7 +105,16 @@ canvas#gl {
   color: var(--gold);
   text-shadow: 0 3px 0 #8a5a00;
   margin: 6px 0 10px;
-  font-size: 2.1rem;
+  font-size: clamp(1.45rem, 4.2vw, 2.1rem);
+  line-height: 1.08;
+}
+.subtitle {
+  color: #ffe7a0;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.82rem;
+  margin: 0 0 12px;
 }
 .tagline { color: #e7f3ff; opacity: 0.9; margin-bottom: 18px; line-height: 1.35; }
 .credits-body { color: #e7f3ff; line-height: 1.45; margin-bottom: 12px; }
@@ -292,7 +301,4 @@ canvas#gl {
 
 @media (min-width: 900px) {
   .screen { padding-left: 7vw; }
-}
-@media (pointer: fine) and (hover: hover) {
-  #touch { display: none !important; }
 }

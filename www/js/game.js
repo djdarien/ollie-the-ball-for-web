@@ -44,11 +44,12 @@ class Input {
       const tag = (e.target && e.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const k = e.key.toLowerCase();
-      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k) || k === "spacebar") {
+      const isJump = k === " " || k === "spacebar" || e.code === "Space";
+      if (isJump || ["arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
         e.preventDefault();
       }
       this.keys.add(k);
-      if (k === " " || k === "spacebar") this.jumpQueued = true;
+      if (isJump) this.jumpQueued = true;
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.key.toLowerCase()));
   }
@@ -94,6 +95,7 @@ export class Game {
     this.grounded = false;
     this.wasGrounded = false;
     this.coyote = 0;
+    this.jumpBuf = 0;
     this.needCoinsT = 0;
     this.padCool = new Map();
     this.camYaw = 0.6;
@@ -192,10 +194,13 @@ export class Game {
       });
     });
     $("btn-pause").addEventListener("click", () => this.setPaused(true));
-    $("btn-jump").addEventListener("pointerdown", (e) => {
+    const queueJump = (e) => {
       e.preventDefault();
+      e.stopPropagation();
       this.input.jumpQueued = true;
-    });
+    };
+    $("btn-jump").addEventListener("pointerdown", queueJump);
+    $("btn-jump").addEventListener("touchstart", queueJump, { passive: false });
     $("vol-music").value = this.save.music;
     $("vol-sfx").value = this.save.sfx;
     $("opt-quality").value = this.save.quality;
@@ -735,6 +740,8 @@ export class Game {
       linearDamping: 0.26,
       angularDamping: 0.4,
       allowSleep: false,
+      collisionFilterGroup: 2,
+      collisionFilterMask: 1,
     });
     this.addMesh(mesh, body);
     this.player = mesh;
@@ -759,7 +766,7 @@ export class Game {
     });
     const playing = name === null;
     $("hud").classList.toggle("hidden", !playing);
-    const touch = window.matchMedia("(pointer: coarse)").matches;
+    const touch = navigator.maxTouchPoints > 0 || window.matchMedia("(pointer: coarse)").matches;
     $("touch").classList.toggle("hidden", !(playing && touch));
   }
 
@@ -811,6 +818,7 @@ export class Game {
     this.input.jumpQueued = false;
     this.wasGrounded = true;
     this.coyote = 0;
+    this.jumpBuf = 0;
     this.showScreen(null);
     this.buildLevel(lv);
     $("hud-level").textContent = `${lv.name} · ${lv.title}`;
@@ -845,18 +853,34 @@ export class Game {
   }
 
   groundedNow() {
-    if (!this.playerBody) return false;
+    const body = this.playerBody;
+    if (!body || !this.world) return false;
+    const contacts = this.world.contacts;
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
+      if (c.bi !== body && c.bj !== body) continue;
+      let ny = c.ni.y;
+      if (c.bi === body) ny = -ny;
+      if (ny > 0.35) return true;
+    }
     this.rayRes.reset();
-    const p = this.playerBody.position;
-    this.ray.from.set(p.x, p.y - BALL_R - 0.02, p.z);
-    this.ray.to.set(p.x, p.y - BALL_R - 0.22, p.z);
-    this.world.raycastClosest(this.ray.from, this.ray.to, { skipBackfaces: true }, this.rayRes);
-    return this.rayRes.hasHit && this.rayRes.body !== this.playerBody;
+    const p = body.position;
+    this.ray.from.set(p.x, p.y, p.z);
+    this.ray.to.set(p.x, p.y - BALL_R - 0.35, p.z);
+    this.world.raycastClosest(this.ray.from, this.ray.to, {
+      skipBackfaces: false,
+      collisionFilterGroup: 1,
+      collisionFilterMask: 1,
+    }, this.rayRes);
+    return this.rayRes.hasHit && this.rayRes.body !== body && this.rayRes.hitNormalWorld.y > 0.35;
   }
 
   physics(dt) {
     if (!this.playerBody || this.mode !== "play" || this.paused || this.won || this.dead) {
-      this.input.jumpQueued = false;
+      if (this.paused || this.mode !== "play") {
+        this.input.jumpQueued = false;
+        this.jumpBuf = 0;
+      }
       if (this.mode === "menu") this.world?.step(dt);
       return;
     }
@@ -870,7 +894,7 @@ export class Game {
     this.right.crossVectors(this.fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
     this.grounded = this.groundedNow();
-    if (this.grounded) this.coyote = 0.1;
+    if (this.grounded) this.coyote = 0.16;
     else this.coyote -= dt;
 
     const force = this.grounded ? 28 : 13;
@@ -879,12 +903,15 @@ export class Game {
     this.playerBody.applyForce(new CANNON.Vec3(fx, 0, fz), this.playerBody.position);
 
     if (this.input.jumpQueued) {
+      this.jumpBuf = 0.16;
       this.input.jumpQueued = false;
-      if (this.coyote > 0) {
-        this.playerBody.velocity.y = 9.6;
-        this.coyote = 0;
-        this.audio.play("jump", { volume: 0.8 });
-      }
+    }
+    this.jumpBuf -= dt;
+    if (this.jumpBuf > 0 && this.coyote > 0) {
+      this.jumpBuf = 0;
+      this.coyote = 0;
+      this.playerBody.velocity.y = Math.max(this.playerBody.velocity.y, 9.8);
+      this.audio.play("jump", { volume: 0.8 });
     }
 
     if (this.grounded && !this.wasGrounded && this.elapsed > 0.35) this.audio.play("hit", { volume: 0.35 });

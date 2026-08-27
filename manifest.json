@@ -1,7 +1,7 @@
 {
-  "name": "Adventures of Ollie the Ball: The Lost Coin Hunt",
-  "short_name": "Ollie the Ball",
-  "description": "Roll Ollie, collect every lost coin, and find the glowing door.",
+  "name": "Adventures of Ollie The Ball: The Lost Coin Hunt",
+  "short_name": "Ollie The Ball",
+  "description": "Our game Adventures of Ollie The Ball: The Lost Coin Hunt was inspired by Rolie Polie Olie. Ollie awoke one morning to all of his coins lost and scattered about the universe. Help Ollie collect the coins by rolling over all coins in each level.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#1a6fb5",

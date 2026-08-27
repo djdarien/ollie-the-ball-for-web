@@ -1,6 +1,6 @@
 {
   "appId": "com.netbytegames.ollietheball",
-  "appName": "Ollie the Ball",
+  "appName": "Adventures of Ollie The Ball: The Lost Coin Hunt",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
@@ -9,7 +9,7 @@
     "contentInset": "never",
     "backgroundColor": "#0d2438",
     "preferredContentMode": "mobile",
-    "scheme": "Ollie the Ball"
+    "scheme": "Ollie The Ball"
   },
   "plugins": {
     "SplashScreen": {

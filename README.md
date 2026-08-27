@@ -1,6 +1,10 @@
-# Adventures of Ollie the Ball: The Lost Coin Hunt
+# Adventures of Ollie The Ball: The Lost Coin Hunt
 
-HTML5 remake of the 2014 Unity 4.5 alpha. Roll Ollie, collect every coin in the stage, then enter the glowing door.
+Our game *Adventures of Ollie The Ball: The Lost Coin Hunt* was inspired by Rolie Polie Olie. The game is simple in nature but intuitive and fun at its core.
+
+The story goes: Ollie awoke one morning to all of his coins lost and scattered about the universe. Now he is in search of his lost coins. Help Ollie collect the coins by rolling Ollie over all coins in each level.
+
+HTML5 remake of the 2014 Unity 4.5 alpha.
 
 The original project still lives in this repo (`Assets/`, `ProjectSettings/`). It targeted **Unity 4.5 + Unity Web Player**, which browsers no longer run, and it used **UnityScript**, which Unity dropped. This `web/` folder is the playable, finished edition.
 

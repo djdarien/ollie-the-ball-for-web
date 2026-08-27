@@ -7,8 +7,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#1a6fb5" />
-  <meta name="description" content="Adventures of Ollie the Ball: The Lost Coin Hunt — roll, collect coins, and find the door." />
-  <title>Adventures of Ollie the Ball</title>
+  <meta name="apple-mobile-web-app-title" content="Ollie The Ball" />
+  <meta name="application-name" content="Adventures of Ollie The Ball: The Lost Coin Hunt" />
+  <meta name="description" content="Our game Adventures of Ollie The Ball: The Lost Coin Hunt was inspired by Rolie Polie Olie. Ollie awoke one morning to all of his coins lost and scattered about the universe. Help Ollie collect the coins by rolling over all coins in each level." />
+  <meta property="og:title" content="Adventures of Ollie The Ball: The Lost Coin Hunt" />
+  <meta property="og:description" content="Inspired by Rolie Polie Olie. Ollie awoke one morning to all of his coins lost and scattered about the universe. Help him collect every coin in each level." />
+  <meta property="og:type" content="website" />
+  <title>Adventures of Ollie The Ball: The Lost Coin Hunt</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/png" href="./icons/favicon.png" />
   <link rel="apple-touch-icon" href="./icons/icon-180.png" />
@@ -53,7 +58,7 @@
     </div>
 
     <section id="screen-splash" class="screen">
-      <img class="splash-art" src="./assets/images/splash.jpg" alt="Adventures of Ollie the Ball: The Lost Coin Hunt" />
+      <img class="splash-art" src="./assets/images/splash.jpg" alt="Adventures of Ollie The Ball: The Lost Coin Hunt" />
       <div class="splash-shade"></div>
       <div class="splash-copy">
         <button type="button" id="btn-enter" class="btn primary">Tap to Play</button>
@@ -63,8 +68,9 @@
     <section id="screen-menu" class="screen hidden">
       <div class="menu-panel">
         <p class="kicker">Adventure 1</p>
-        <h1>Ollie the Ball</h1>
-        <p class="tagline">Collect every lost coin, then roll through the glowing door.</p>
+        <h1>Adventures of Ollie The Ball</h1>
+        <p class="subtitle">The Lost Coin Hunt</p>
+        <p class="tagline">Ollie awoke one morning to all of his coins lost and scattered about the universe. Now he is in search of his lost coins. Help Ollie collect them by rolling over every coin in each level.</p>
         <nav class="menu-nav">
           <button type="button" class="btn primary" data-action="play">Play</button>
           <button type="button" class="btn" data-action="levels">Choose Level</button>
@@ -96,7 +102,7 @@
           <li><strong>Jump</strong> — Space, or the Jump button.</li>
           <li><strong>Look</strong> — drag on the world to orbit the camera.</li>
           <li><strong>Pause</strong> — Esc, or the pause button.</li>
-          <li><strong>Goal</strong> — pick up every gold coin, then enter the glowing door. Falling off the path sends Ollie back.</li>
+          <li><strong>Goal</strong> — roll Ollie over every coin in the level, then enter the glowing door. Falling off the path sends Ollie back.</li>
           <li><strong>QA</strong> — type <em>ollie</em> (or enter it as the level code) to unlock every stage.</li>
         </ul>
         <button type="button" class="btn" data-action="menu">Back</button>
@@ -106,14 +112,22 @@
     <section id="screen-credits" class="screen hidden">
       <div class="menu-panel">
         <p class="kicker">About</p>
-        <h2>Credits</h2>
+        <h2>Adventures of Ollie The Ball</h2>
+        <p class="subtitle">The Lost Coin Hunt</p>
         <p class="credits-body">
-          Originally built in Unity 4.5 (2014) as
-          <em>Adventures of Ollie the Ball: The Lost Coin Hunt</em>.
-          This HTML5 edition finishes the unfinished stages, replaces the retired
-          Unity Web Player, and keeps Ollie’s original face, coin-hunt rules, and sound effects.
+          Our game <em>Adventures of Ollie The Ball: The Lost Coin Hunt</em> was inspired by
+          Rolie Polie Olie. The game is simple in nature but intuitive and fun at its core.
         </p>
-        <p class="credits-body">Roll, collect, and bring Ollie home.</p>
+        <p class="credits-body">
+          The story goes: Ollie awoke one morning to all of his coins lost and scattered
+          about the universe. Now he is in search of his lost coins. Help Ollie collect
+          the coins by rolling Ollie over all coins in each level.
+        </p>
+        <p class="credits-body">
+          Originally built in Unity 4.5 (2014). This HTML5 edition finishes the unfinished
+          stages, replaces the retired Unity Web Player, and keeps Ollie’s original face,
+          coin-hunt rules, and sound effects.
+        </p>
         <button type="button" class="btn" data-action="menu">Back</button>
       </div>
     </section>
@@ -150,6 +164,6 @@
       </div>
     </section>
   </div>
-  <script type="module" src="./js/game.js"></script>
+  <script type="module" src="./js/game.js?v=3"></script>
 </body>
 </html>
