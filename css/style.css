@@ -206,7 +206,10 @@ canvas#gl {
   font-weight: 800;
   backdrop-filter: blur(8px);
 }
+.hud-left { flex-wrap: wrap; }
 .coin-pill { display: flex; align-items: center; gap: 8px; }
+.pill.skill.super { border-color: #ffd27a; color: #ffe7a0; }
+.pill.skill.slow { border-color: #8cefff; color: #c5f6ff; }
 .coin-dot {
   width: 16px; height: 16px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff3a8, #f0b21a 55%, #c47a00);

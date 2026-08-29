@@ -40,6 +40,8 @@
           <span class="coin-dot" aria-hidden="true"></span>
           <span id="hud-coins">0 / 0</span>
         </div>
+        <div class="pill skill super hidden" id="hud-super"></div>
+        <div class="pill skill slow hidden" id="hud-slow"></div>
       </div>
       <div class="hud-right">
         <div class="pill" id="hud-time">0.0</div>
@@ -103,6 +105,8 @@
           <li><strong>Look</strong> — drag on the world to orbit the camera.</li>
           <li><strong>Pause</strong> — Esc, or the pause button.</li>
           <li><strong>Goal</strong> — roll Ollie over every coin in the level, then enter the glowing door. Falling off the path sends Ollie back.</li>
+          <li><strong>Gold orb</strong> — Super Jump. Your next hop soars much higher.</li>
+          <li><strong>Cyan orb</strong> — Slowdown. Ollie eases up for a few seconds so you can aim.</li>
           <li><strong>QA</strong> — type <em>ollie</em> (or enter it as the level code) to unlock every stage.</li>
         </ul>
         <button type="button" class="btn" data-action="menu">Back</button>
@@ -164,6 +168,6 @@
       </div>
     </section>
   </div>
-  <script type="module" src="./js/game.js?v=3"></script>
+  <script type="module" src="./js/game.js?v=4"></script>
 </body>
 </html>

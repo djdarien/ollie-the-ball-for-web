@@ -6,6 +6,15 @@ import { LEVELS, SHOWCASE } from "./levels.js";
 const BALL_R = 0.45;
 const SAVE_KEY = "ollie-the-ball-v1";
 const STEP = 1 / 60;
+const ROLL_FORCE = 11;
+const AIR_FORCE = 5;
+const JUMP_V = 8.2;
+const SUPER_JUMP_V = 15.6;
+const MAX_SPEED = 4.5;
+const SLOW_MAX = 2.6;
+const ROLL_DAMP = 0.52;
+const SLOW_DAMP = 0.8;
+const SLOW_TIME = 5;
 
 const $ = (id) => document.getElementById(id);
 
@@ -116,10 +125,14 @@ export class Game {
     this.teleporters = [];
     this.movers = [];
     this.hazards = [];
+    this.pickups = [];
     this.door = null;
     this.player = null;
     this.playerBody = null;
     this.level = null;
+    this.superJumps = 0;
+    this.slowT = 0;
+    this.boostIgnoreCap = 0;
 
     this.canvas = $("gl");
     this.renderer = null;
@@ -171,6 +184,7 @@ export class Game {
       cone: new THREE.ConeGeometry(1, 1, 10),
       plane: new THREE.PlaneGeometry(1, 1, 1, 1),
       torus: new THREE.TorusGeometry(1.15, 0.12, 10, 28),
+      orb: new THREE.SphereGeometry(0.34, 16, 12),
     };
 
     this.cheatBuf = "";
@@ -422,6 +436,23 @@ export class Game {
       metalness: 0.4,
     });
     this.mats.roof = new THREE.MeshStandardMaterial({ color: 0x8a3a28, roughness: 0.85 });
+    this.mats.pine = new THREE.MeshStandardMaterial({ color: 0x1f5c38, roughness: 0.9 });
+    this.mats.rock = new THREE.MeshStandardMaterial({ color: 0x8a8680, roughness: 0.95, map: this.textures.stone || null });
+    this.mats.bush = new THREE.MeshStandardMaterial({ color: 0x3f9a4a, roughness: 0.92 });
+    this.mats.slow = new THREE.MeshStandardMaterial({
+      color: 0x7fe8ff,
+      emissive: 0x1488aa,
+      emissiveIntensity: 0.95,
+      roughness: 0.28,
+      metalness: 0.35,
+    });
+    this.mats.super = new THREE.MeshStandardMaterial({
+      color: 0xffc14a,
+      emissive: 0xaa6600,
+      emissiveIntensity: 0.95,
+      roughness: 0.28,
+      metalness: 0.4,
+    });
   }
 
   newPhysics() {
@@ -461,6 +492,7 @@ export class Game {
     this.teleporters = [];
     this.movers = [];
     this.hazards = [];
+    this.pickups = [];
     this.door = null;
     this.player = null;
     this.playerBody = null;
@@ -579,8 +611,13 @@ export class Game {
 
     for (const d of level.decor || []) this.makeDecor(d);
     for (const h of level.hazards || []) this.hazards.push(h);
+    for (const s of level.skills || []) this.makeSkill(s);
     if (level.waterfall) this.makeWaterfall(level.waterfall.pos);
     if (level.rain) this.makeRain();
+
+    this.superJumps = 0;
+    this.slowT = 0;
+    this.updateSkillHud();
 
     this.spawnPlayer(level.spawn, { kinematic: showcase });
     this.found = 0;
@@ -684,6 +721,62 @@ export class Game {
       const hole = new THREE.Mesh(this.geos.cyl, new THREE.MeshBasicMaterial({ color: 0x111111 }));
       hole.scale.set(0.85, 0.52, 0.85);
       g.add(ring, hole);
+    } else if (d.type === "pine") {
+      const sc = d.scale || 1;
+      const trunk = new THREE.Mesh(this.geos.cyl, this.mats.bark);
+      trunk.scale.set(0.22 * sc, 1.8 * sc, 0.22 * sc);
+      trunk.position.y = 0.9 * sc;
+      const a = new THREE.Mesh(this.geos.cone, this.mats.pine);
+      a.scale.set(1.5 * sc, 2.2 * sc, 1.5 * sc);
+      a.position.y = 2.2 * sc;
+      const b = a.clone();
+      b.scale.set(1.15 * sc, 1.7 * sc, 1.15 * sc);
+      b.position.y = 3.2 * sc;
+      g.add(trunk, a, b);
+      this.boxMesh([0.7 * sc, 3.4 * sc, 0.7 * sc], "wood", [d.pos[0], d.pos[1] + 1.5 * sc, d.pos[2]], { visible: false });
+    } else if (d.type === "hut") {
+      const body = new THREE.Mesh(this.geos.box, this.mats.wood);
+      body.scale.set(2.6, 2.2, 2.4);
+      body.position.y = 1.0;
+      const roof = new THREE.Mesh(this.geos.cone, this.mats.roof);
+      roof.scale.set(2.2, 1.5, 2.2);
+      roof.position.y = 2.7;
+      g.add(body, roof);
+      this.boxMesh([2.6, 2.2, 2.4], "wood", [d.pos[0], d.pos[1] + 1.0, d.pos[2]], { visible: false });
+    } else if (d.type === "tower") {
+      const h = d.h || 5;
+      const body = new THREE.Mesh(this.geos.box, this.mats.brick);
+      body.scale.set(2.6, h, 2.6);
+      body.position.y = h / 2;
+      const roof = new THREE.Mesh(this.geos.cone, this.mats.roof);
+      roof.scale.set(2.2, 1.6, 2.2);
+      roof.position.y = h + 0.6;
+      g.add(body, roof);
+      this.boxMesh([2.6, h, 2.6], "brick", [d.pos[0], d.pos[1] + h / 2, d.pos[2]], { visible: false });
+    } else if (d.type === "rock") {
+      const sc = d.scale || 1;
+      const m = new THREE.Mesh(this.geos.sphere, this.mats.rock);
+      m.scale.set(1.1 * sc, 0.7 * sc, 1.2 * sc);
+      g.add(m);
+      this.boxMesh([1.6 * sc, 0.9 * sc, 1.6 * sc], "stone", [d.pos[0], d.pos[1], d.pos[2]], { visible: false });
+    } else if (d.type === "bush") {
+      const m = new THREE.Mesh(this.geos.sphere, this.mats.bush);
+      m.scale.set(0.9, 0.7, 0.9);
+      g.add(m);
+    } else if (d.type === "lamp") {
+      const pole = new THREE.Mesh(this.geos.cyl, this.mats.stone);
+      pole.scale.set(0.08, 2.2, 0.08);
+      pole.position.y = 1.1;
+      const lamp = new THREE.Mesh(this.geos.sphere, this.mats.gold);
+      lamp.scale.set(0.28, 0.28, 0.28);
+      lamp.position.y = 2.3;
+      g.add(pole, lamp);
+    } else if (d.type === "container") {
+      const m = new THREE.Mesh(this.geos.box, this.mats.crate);
+      m.scale.set(d.len || 3.4, 1.6, 1.5);
+      g.add(m);
+      this.boxMesh([d.len || 3.4, 1.6, 1.5], "crate", d.pos);
+      return;
     }
     g.traverse((o) => {
       if (o.isMesh) {
@@ -692,6 +785,14 @@ export class Game {
       }
     });
     this.addMesh(g);
+  }
+
+  makeSkill(s) {
+    const mesh = new THREE.Mesh(this.geos.orb, s.type === "slow" ? this.mats.slow : this.mats.super);
+    mesh.position.set(s.pos[0], s.pos[1], s.pos[2]);
+    mesh.castShadow = true;
+    this.addMesh(mesh);
+    this.pickups.push({ mesh, type: s.type, pos: s.pos.slice(), taken: false });
   }
 
   makeWaterfall(pos) {
@@ -737,8 +838,8 @@ export class Game {
       shape: new CANNON.Sphere(BALL_R),
       material: this.ballMat,
       position: new CANNON.Vec3(pos[0], pos[1], pos[2]),
-      linearDamping: 0.26,
-      angularDamping: 0.4,
+      linearDamping: ROLL_DAMP,
+      angularDamping: 0.22,
       allowSleep: false,
       collisionFilterGroup: 2,
       collisionFilterMask: 1,
@@ -793,7 +894,7 @@ export class Game {
       btn.disabled = locked;
       const best = this.save.best[lv.id];
       btn.innerHTML = `<div class="num">${lv.name}</div><div>${locked ? "Locked" : lv.title}</div>
-        <div class="best">${best ? `Best ${best.toFixed(1)}s` : locked ? "Clear earlier stages" : "No time yet"}</div>`;
+        <div class="best">${locked ? "Clear earlier stages" : `${lv.blurb || ""}${best ? ` · Best ${best.toFixed(1)}s` : ""}`}</div>`;
       btn.addEventListener("click", () => {
         if (!locked) this.startLevel(i);
       });
@@ -819,12 +920,17 @@ export class Game {
     this.wasGrounded = true;
     this.coyote = 0;
     this.jumpBuf = 0;
+    this.superJumps = 0;
+    this.slowT = 0;
+    this.boostIgnoreCap = 0;
     this.showScreen(null);
     this.buildLevel(lv);
     $("hud-level").textContent = `${lv.name} · ${lv.title}`;
     this.updateCoinsHud();
+    this.updateSkillHud();
     this.audio.startMusic(lv.theme);
-    if (lv.hint) this.flashNeed(lv.hint, 3.2);
+    const intro = lv.story || lv.hint;
+    if (intro) this.flashNeed(intro, 5.2, true);
   }
 
   setPaused(p) {
@@ -842,6 +948,19 @@ export class Game {
 
   updateCoinsHud() {
     $("hud-coins").textContent = `${this.found} / ${this.total}`;
+  }
+
+  updateSkillHud() {
+    const sup = $("hud-super");
+    const slow = $("hud-slow");
+    if (sup) {
+      sup.classList.toggle("hidden", this.superJumps <= 0);
+      sup.textContent = this.superJumps > 0 ? `Super Jump ×${this.superJumps}` : "";
+    }
+    if (slow) {
+      slow.classList.toggle("hidden", this.slowT <= 0);
+      slow.textContent = this.slowT > 0 ? `Slow ${this.slowT.toFixed(1)}s` : "";
+    }
   }
 
   flashNeed(text, dur = 3, ok = false) {
@@ -897,10 +1016,25 @@ export class Game {
     if (this.grounded) this.coyote = 0.16;
     else this.coyote -= dt;
 
-    const force = this.grounded ? 28 : 13;
+    if (this.slowT > 0) {
+      this.slowT = Math.max(0, this.slowT - dt);
+      this.updateSkillHud();
+    }
+    this.playerBody.linearDamping = this.slowT > 0 ? SLOW_DAMP : ROLL_DAMP;
+
+    const force = (this.grounded ? ROLL_FORCE : AIR_FORCE) * (this.slowT > 0 ? 0.55 : 1);
     const fx = this.fwd.x * axes.y * force + this.right.x * axes.x * force;
     const fz = this.fwd.z * axes.y * force + this.right.z * axes.x * force;
     this.playerBody.applyForce(new CANNON.Vec3(fx, 0, fz), this.playerBody.position);
+
+    if (this.boostIgnoreCap > 0) this.boostIgnoreCap -= dt;
+    const hv = Math.hypot(this.playerBody.velocity.x, this.playerBody.velocity.z);
+    const cap = this.slowT > 0 ? SLOW_MAX : MAX_SPEED;
+    if (this.boostIgnoreCap <= 0 && hv > cap) {
+      const s = cap / hv;
+      this.playerBody.velocity.x *= s;
+      this.playerBody.velocity.z *= s;
+    }
 
     if (this.input.jumpQueued) {
       this.jumpBuf = 0.16;
@@ -910,8 +1044,16 @@ export class Game {
     if (this.jumpBuf > 0 && this.coyote > 0) {
       this.jumpBuf = 0;
       this.coyote = 0;
-      this.playerBody.velocity.y = Math.max(this.playerBody.velocity.y, 9.8);
-      this.audio.play("jump", { volume: 0.8 });
+      const superJump = this.superJumps > 0;
+      if (superJump) {
+        this.superJumps -= 1;
+        this.updateSkillHud();
+        this.playerBody.velocity.y = Math.max(this.playerBody.velocity.y, SUPER_JUMP_V);
+        this.audio.play("jumpBooster", { volume: 0.85 });
+      } else {
+        this.playerBody.velocity.y = Math.max(this.playerBody.velocity.y, JUMP_V);
+        this.audio.play("jump", { volume: 0.8 });
+      }
     }
 
     if (this.grounded && !this.wasGrounded && this.elapsed > 0.35) this.audio.play("hit", { volume: 0.35 });
@@ -971,6 +1113,26 @@ export class Game {
         this.updateCoinsHud();
       }
     }
+    for (const s of this.pickups) {
+      if (s.taken) continue;
+      const d = Math.hypot(p.x - s.pos[0], p.y - s.pos[1], p.z - s.pos[2]);
+      if (d < 1.05) {
+        s.taken = true;
+        s.mesh.visible = false;
+        if (s.type === "slow") {
+          this.slowT = SLOW_TIME;
+          this.playerBody.velocity.x *= 0.4;
+          this.playerBody.velocity.z *= 0.4;
+          this.audio.play("teleporter", { volume: 0.7 });
+          this.flashNeed("Slowdown! Ollie eases up for a few seconds.", 2.2, true);
+        } else {
+          this.superJumps = Math.min(2, this.superJumps + 1);
+          this.audio.play("jumpBooster", { volume: 0.7 });
+          this.flashNeed("Super Jump ready — your next hop soars.", 2.2, true);
+        }
+        this.updateSkillHud();
+      }
+    }
   }
 
   touchPads(dt) {
@@ -982,6 +1144,7 @@ export class Game {
       if (d < 1.15 && yok && (this.padCool.get("b" + i) || 0) <= 0) {
         this.padCool.set("b" + i, 0.85);
         if (b.type === "speed") {
+          this.boostIgnoreCap = 0.9;
           this.playerBody.velocity.x += b.dir[0] * b.force * 0.55;
           this.playerBody.velocity.y += (b.dir[1] || 0) * b.force * 0.35;
           this.playerBody.velocity.z += b.dir[2] * b.force * 0.55;
@@ -1128,6 +1291,11 @@ export class Game {
       if (c.taken) continue;
       c.mesh.rotation.z = t * 2.4;
       c.mesh.position.y = c.pos[1] + Math.sin(t * 3 + c.pos[0]) * 0.12;
+    }
+    for (const s of this.pickups) {
+      if (s.taken) continue;
+      s.mesh.rotation.y = t * 2.2;
+      s.mesh.position.y = s.pos[1] + Math.sin(t * 3.4 + s.pos[0]) * 0.16;
     }
     if (this.door) {
       const pulse = 0.9 + Math.sin(t * 3) * 0.08;
