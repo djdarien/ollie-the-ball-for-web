@@ -133,6 +133,10 @@ export class Game {
     this.superJumps = 0;
     this.slowT = 0;
     this.boostIgnoreCap = 0;
+    this.safePos = null;
+    this.safeHold = 0;
+    this.respawnLock = 0;
+    this.sparks = [];
 
     this.canvas = $("gl");
     this.renderer = null;
@@ -235,6 +239,10 @@ export class Game {
     });
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this.mode === "play") this.setPaused(!this.paused);
+      if ((e.key === "r" || e.key === "R") && this.mode === "play") {
+        this.camYaw = 0.55;
+        this.camPitch = 0.42;
+      }
       this.noteCheatKey(e);
     });
     const cheat = $("cheat-code");
@@ -362,7 +370,7 @@ export class Game {
 
   async loadTextures() {
     const loader = new THREE.TextureLoader();
-    const names = ["ollie", "grass", "wood", "stone", "sand", "brick", "forest", "crate"];
+    const names = ["ollie", "grass", "wood", "stone", "sand", "brick", "forest", "crate", "concrete"];
     const files = {
       ollie: "assets/textures/ollie.png",
       grass: "assets/textures/grass.jpg",
@@ -372,6 +380,7 @@ export class Game {
       brick: "assets/textures/brick.jpg",
       forest: "assets/textures/forest.jpg",
       crate: "assets/textures/crate.jpg",
+      concrete: "assets/textures/concrete.jpg",
     };
     await Promise.all(names.map((n) => new Promise((resolve) => {
       loader.load(files[n], (t) => {
@@ -393,6 +402,7 @@ export class Game {
     this.mats.brick = mk(this.textures.brick, 0xffffff, 0.88, 0.02);
     this.mats.forest = mk(this.textures.forest, 0xffffff);
     this.mats.crate = mk(this.textures.crate, 0xffffff, 0.82, 0.02);
+    this.mats.concrete = mk(this.textures.concrete, 0xffffff, 0.92, 0.06);
     this.mats.ollie = new THREE.MeshStandardMaterial({
       map: this.textures.ollie,
       roughness: 0.32,
@@ -493,6 +503,8 @@ export class Game {
     this.movers = [];
     this.hazards = [];
     this.pickups = [];
+    this.sparks.forEach((s) => this.scene.remove(s.mesh));
+    this.sparks = [];
     this.door = null;
     this.player = null;
     this.playerBody = null;
@@ -532,6 +544,20 @@ export class Game {
     return { mesh, body };
   }
 
+  addCurbs(plat) {
+    const [x, y, z] = plat.pos;
+    const [w, h, d] = plat.size;
+    const top = y + h / 2;
+    const t = 0.22;
+    const hh = 0.42;
+    const mat = plat.mat === "brick" || plat.mat === "concrete" ? "concrete" : "stone";
+    const open = plat.open || "";
+    if (!open.includes("z+")) this.boxMesh([w, hh, t], mat, [x, top + hh / 2, z + d / 2 - t / 2]);
+    if (!open.includes("z-")) this.boxMesh([w, hh, t], mat, [x, top + hh / 2, z - d / 2 + t / 2]);
+    if (!open.includes("x+")) this.boxMesh([t, hh, d], mat, [x + w / 2 - t / 2, top + hh / 2, z]);
+    if (!open.includes("x-")) this.boxMesh([t, hh, d], mat, [x - w / 2 + t / 2, top + hh / 2, z]);
+  }
+
   tiledMat(name, size) {
     const base = this.mats[name] || this.mats.grass;
     const mat = base.clone();
@@ -556,7 +582,10 @@ export class Game {
     this.sun.position.set(18, 28, 10);
     this.sun.target.position.set(20, 0, 0);
 
-    for (const plat of level.platforms || []) this.boxMesh(plat.size, plat.mat, plat.pos);
+    for (const plat of level.platforms || []) {
+      this.boxMesh(plat.size, plat.mat, plat.pos);
+      if (plat.curb) this.addCurbs(plat);
+    }
     for (const w of level.walls || []) this.boxMesh(w.size, w.mat, w.pos);
 
     if (level.water) {
@@ -851,14 +880,19 @@ export class Game {
 
   async enter() {
     if (!this.renderer) return;
-    await this.audio.unlock();
-    this.audio.setMusic(this.save.music);
-    this.audio.setSfx(this.save.sfx);
-    if (!this.textures.ollie) await this.loadTextures();
-    this.showScreen("menu");
-    this.buildLevel(SHOWCASE, { showcase: true });
-    this.mode = "menu";
-    this.audio.startMusic("day");
+    try {
+      await this.audio.unlock();
+      this.audio.setMusic(this.save.music);
+      this.audio.setSfx(this.save.sfx);
+      if (!this.textures.ollie) await this.loadTextures();
+      this.showScreen("menu");
+      this.buildLevel(SHOWCASE, { showcase: true });
+      this.mode = "menu";
+      this.audio.startMusic("menu");
+    } catch (err) {
+      console.error(err);
+      this.flashNeed("Could not start the game. Refresh and try again.", 4);
+    }
   }
 
   showScreen(name) {
@@ -876,9 +910,13 @@ export class Game {
     if (action === "levels") {
       this.renderLevelGrid();
       this.showScreen("levels");
+      this.audio.startMusic("menu");
     }
     if (action === "controls") this.showScreen("controls");
-    if (action === "credits") this.showScreen("credits");
+    if (action === "credits") {
+      this.showScreen("credits");
+      this.audio.startMusic("menu");
+    }
     if (action === "menu") this.goMenu();
     if (action === "resume") this.setPaused(false);
     if (action === "retry") this.startLevel(this.levelIndex);
@@ -907,10 +945,11 @@ export class Game {
     this.mode = "menu";
     this.showScreen("menu");
     this.buildLevel(SHOWCASE, { showcase: true });
-    this.audio.startMusic("day");
+    this.audio.startMusic("menu");
   }
 
   startLevel(index) {
+    if (!LEVELS[index]) return;
     this.levelIndex = index;
     const lv = LEVELS[index];
     this.paused = false;
@@ -923,6 +962,9 @@ export class Game {
     this.superJumps = 0;
     this.slowT = 0;
     this.boostIgnoreCap = 0;
+    this.safePos = lv.spawn.slice();
+    this.safeHold = 0;
+    this.respawnLock = 0;
     this.showScreen(null);
     this.buildLevel(lv);
     $("hud-level").textContent = `${lv.name} · ${lv.title}`;
@@ -965,6 +1007,7 @@ export class Game {
 
   flashNeed(text, dur = 3, ok = false) {
     const el = $("toast");
+    if (!el) return;
     el.textContent = text;
     el.classList.toggle("ok", !!ok);
     el.classList.remove("hidden");
@@ -1013,8 +1056,18 @@ export class Game {
     this.right.crossVectors(this.fwd, new THREE.Vector3(0, 1, 0)).normalize();
 
     this.grounded = this.groundedNow();
-    if (this.grounded) this.coyote = 0.16;
-    else this.coyote -= dt;
+    if (this.grounded) {
+      this.coyote = 0.16;
+      this.safeHold += dt;
+      if (this.safeHold > 0.4 && this.playerBody.velocity.y < 1.5) {
+        const sp = this.playerBody.position;
+        this.safePos = [sp.x, sp.y + 0.15, sp.z];
+      }
+    } else {
+      this.coyote -= dt;
+      this.safeHold = 0;
+    }
+    if (this.respawnLock > 0) this.respawnLock -= dt;
 
     if (this.slowT > 0) {
       this.slowT = Math.max(0, this.slowT - dt);
@@ -1110,6 +1163,7 @@ export class Game {
         c.mesh.visible = false;
         this.found++;
         this.audio.play("coin", { volume: 0.9, playbackRate: 0.95 + Math.random() * 0.1 });
+        this.sparkAt(c.pos);
         this.updateCoinsHud();
       }
     }
@@ -1179,20 +1233,43 @@ export class Game {
   }
 
   checkDeath() {
+    if (this.respawnLock > 0) return;
     const p = this.playerBody.position;
-    if (p.y < (this.level.killY ?? -8)) {
-      this.die();
-      return;
-    }
-    if (this.level.water && p.y < this.level.water.y + 0.35) {
-      this.die();
-      return;
-    }
+    let tumbled = false;
+    if (p.y < (this.level.killY ?? -8)) tumbled = true;
+    if (this.level.water && p.y < this.level.water.y + 0.35) tumbled = true;
     for (const h of this.hazards) {
       if (Math.abs(p.x - h.pos[0]) < h.size[0] / 2 && Math.abs(p.z - h.pos[2]) < h.size[2] / 2 && p.y < h.pos[1] + 1.2) {
-        this.die();
-        return;
+        tumbled = true;
       }
+    }
+    if (tumbled) this.tumble();
+  }
+
+  tumble() {
+    if (this.dead || this.won) return;
+    const spawn = this.safePos || this.level.spawn;
+    this.playerBody.position.set(spawn[0], spawn[1] + 0.4, spawn[2]);
+    this.playerBody.velocity.set(0, 0, 0);
+    this.playerBody.angularVelocity.set(0, 0, 0);
+    this.respawnLock = 0.9;
+    this.audio.play("hit", { volume: 0.7 });
+    this.flashNeed("Ollie tumbled — back to the last safe spot.", 2, true);
+  }
+
+  sparkAt(pos) {
+    for (let i = 0; i < 8; i++) {
+      const mesh = new THREE.Mesh(this.geos.orb, this.mats.gold);
+      mesh.scale.setScalar(0.18);
+      mesh.position.set(pos[0], pos[1], pos[2]);
+      this.scene.add(mesh);
+      this.sparks.push({
+        mesh,
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 3 + 1,
+        vz: (Math.random() - 0.5) * 4,
+        life: 0.45,
+      });
     }
   }
 
@@ -1273,7 +1350,11 @@ export class Game {
       this.camDist = 12;
     }
 
-    const target = this.player ? this.player.position : new THREE.Vector3();
+    const target = this.player ? this.player.position.clone() : new THREE.Vector3();
+    if (this.mode === "play" && this.playerBody) {
+      target.x += this.playerBody.velocity.x * 0.16;
+      target.z += this.playerBody.velocity.z * 0.16;
+    }
     const cp = Math.cos(this.camPitch);
     const ox = Math.sin(this.camYaw) * cp * this.camDist;
     const oz = Math.cos(this.camYaw) * cp * this.camDist;
@@ -1323,7 +1404,20 @@ export class Game {
     }
     if (this.needCoinsT > 0) {
       this.needCoinsT -= dt;
-      if (this.needCoinsT <= 0) $("toast").classList.add("hidden");
+      if (this.needCoinsT <= 0) $("toast")?.classList.add("hidden");
+    }
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const s = this.sparks[i];
+      s.life -= dt;
+      s.vy -= 8 * dt;
+      s.mesh.position.x += s.vx * dt;
+      s.mesh.position.y += s.vy * dt;
+      s.mesh.position.z += s.vz * dt;
+      s.mesh.scale.setScalar(Math.max(0.02, s.life));
+      if (s.life <= 0) {
+        this.scene.remove(s.mesh);
+        this.sparks.splice(i, 1);
+      }
     }
   }
 
@@ -1338,8 +1432,15 @@ export class Game {
     else if (this.mode === "menu") this.syncMeshes();
     this.updateCamera(dt);
     this.animateVisuals(this.clock.elapsedTime, dt);
-    if (this.mode === "play" && !this.paused) $("hud-time").textContent = this.elapsed.toFixed(1);
-    this.renderer?.render(this.scene, this.camera);
+    if (this.mode === "play" && !this.paused) {
+      const timeEl = $("hud-time");
+      if (timeEl) timeEl.textContent = this.elapsed.toFixed(1);
+    }
+    try {
+      this.renderer?.render(this.scene, this.camera);
+    } catch (err) {
+      console.error(err);
+    }
     requestAnimationFrame(this.loop);
   };
 
