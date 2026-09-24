@@ -204,6 +204,11 @@ export class Game {
 
   bindUI() {
     $("btn-enter").addEventListener("click", () => this.enter());
+    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      this.flashNeed("The picture stalled. Refresh the page to keep playing.", 6);
+    });
     document.querySelectorAll("[data-action]").forEach((btn) => {
       btn.addEventListener("mouseenter", () => this.audio.play("select", { volume: 0.4 }));
       btn.addEventListener("click", () => {
@@ -878,8 +883,29 @@ export class Game {
     this.playerBody = body;
   }
 
+  continueIndex() {
+    const unlocked = Math.max(1, Number(this.save.unlocked) || 1);
+    if (unlocked > LEVELS.length) return 0;
+    return unlocked - 1;
+  }
+
+  refreshPlayButton() {
+    const btn = document.querySelector("[data-action='play']");
+    if (!btn) return;
+    const unlocked = Math.max(1, Number(this.save.unlocked) || 1);
+    if (unlocked > LEVELS.length) btn.textContent = "Play Again";
+    else if (unlocked > 1) btn.textContent = `Continue · ${LEVELS[unlocked - 1].name}`;
+    else btn.textContent = "Play";
+  }
+
   async enter() {
-    if (!this.renderer) return;
+    if (!this.renderer || this.booting || this.mode !== "splash") return;
+    this.booting = true;
+    const btn = $("btn-enter");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Loading…";
+    }
     try {
       await this.audio.unlock();
       this.audio.setMusic(this.save.music);
@@ -888,25 +914,32 @@ export class Game {
       this.showScreen("menu");
       this.buildLevel(SHOWCASE, { showcase: true });
       this.mode = "menu";
+      this.refreshPlayButton();
       this.audio.startMusic("menu");
     } catch (err) {
       console.error(err);
+      this.booting = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Tap to Play";
+      }
       this.flashNeed("Could not start the game. Refresh and try again.", 4);
     }
   }
 
   showScreen(name) {
     ["splash", "menu", "levels", "controls", "credits", "pause", "result"].forEach((n) => {
-      $(`screen-${n}`).classList.toggle("hidden", n !== name);
+      const el = $(`screen-${n}`);
+      if (el) el.classList.toggle("hidden", n !== name);
     });
     const playing = name === null;
-    $("hud").classList.toggle("hidden", !playing);
+    $("hud")?.classList.toggle("hidden", !playing);
     const touch = navigator.maxTouchPoints > 0 || window.matchMedia("(pointer: coarse)").matches;
-    $("touch").classList.toggle("hidden", !(playing && touch));
+    $("touch")?.classList.toggle("hidden", !(playing && touch));
   }
 
   onAction(action) {
-    if (action === "play") this.startLevel(0);
+    if (action === "play") this.startLevel(this.continueIndex());
     if (action === "levels") {
       this.renderLevelGrid();
       this.showScreen("levels");
@@ -945,6 +978,7 @@ export class Game {
     this.mode = "menu";
     this.showScreen("menu");
     this.buildLevel(SHOWCASE, { showcase: true });
+    this.refreshPlayButton();
     this.audio.startMusic("menu");
   }
 
@@ -1279,11 +1313,15 @@ export class Game {
     this.audio.stopMusic();
     const t = this.elapsed;
     const prev = this.save.best[this.level.id];
-    if (!prev || t < prev) this.save.best[this.level.id] = t;
+    const isBest = !prev || t < prev;
+    if (isBest) this.save.best[this.level.id] = t;
     this.save.unlocked = Math.max(this.save.unlocked, this.level.id + 1);
     writeSave(this.save);
-    $("result-title").textContent = "You Win!";
-    $("result-sub").textContent = `${this.level.title} cleared in ${t.toFixed(1)}s`;
+    $("result-title").textContent = this.levelIndex === LEVELS.length - 1 ? "Hunt Complete!" : "You Win!";
+    $("result-sub").textContent = `${this.level.title} cleared in ${t.toFixed(1)}s${isBest ? " — new best!" : ""}`;
+    setTimeout(() => {
+      if (this.won) this.audio.startMusic("menu");
+    }, 1400);
     const nav = $("result-actions");
     nav.innerHTML = "";
     const next = this.levelIndex + 1 < LEVELS.length;

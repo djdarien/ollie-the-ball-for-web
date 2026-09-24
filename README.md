@@ -1,14 +1,8 @@
 # Adventures of Ollie The Ball: The Lost Coin Hunt
 
-Our game *Adventures of Ollie The Ball: The Lost Coin Hunt* was inspired by Rolie Polie Olie. The game is simple in nature but intuitive and fun at its core.
+A finished HTML5 edition of a 2014 Unity game. Ollie is a little yellow ball who woke up to find his coins scattered across the universe. Roll over every coin in a level, then take the glowing door.
 
-The story goes: Ollie awoke one morning to all of his coins lost and scattered about the universe. Now he is in search of his lost coins. Help Ollie collect the coins by rolling Ollie over all coins in each level.
-
-HTML5 remake of the 2014 Unity 4.5 alpha.
-
-The original project still lives in this repo (`Assets/`, `ProjectSettings/`). It targeted **Unity 4.5 + Unity Web Player**, which browsers no longer run, and it used **UnityScript**, which Unity dropped. This `web/` folder is the playable, finished edition.
-
-## Play
+## Play it
 
 From this folder:
 
@@ -16,52 +10,28 @@ From this folder:
 python3 -m http.server 8080
 ```
 
-Then open http://localhost:8080
+Open http://localhost:8080 and tap **Play**.
 
-Do not open `index.html` as a file URL. ES modules need a local server.
+Do not double-click `index.html`. Browsers block the game if it is opened as a file.
 
-### Controls
+## Share it
 
-| Action | Desktop | Phone / iPad |
+Zip this folder, leave out `node_modules/` and `ios/`, and send the zip. The person playing runs the same two commands above, or you can drop the folder on any static host (GitHub Pages, Netlify, a school web folder).
+
+On a phone, use **Add to Home Screen** after it is hosted. The page already has an icon and a name.
+
+## How to play
+
+| Action | Keyboard | Phone |
 | --- | --- | --- |
-| Move | WASD or arrows | Left stick |
-| Jump | Space | Jump button |
-| Look | Drag / scroll | Drag the world |
-| Pause | Esc | Pause button |
+| Roll | WASD or arrows | Left stick |
+| Jump | Space | Jump |
+| Look | Drag, scroll to zoom | Drag the world |
+| Camera reset | R | — |
+| Pause | Esc | Pause |
 
-Goal: collect **all** coins, then roll into the door. Falling off the path (or into water / the well) retries the level.
+Collect every coin, then roll into the door. A tumble (a ledge, the water, the well) sends Ollie back to the last safe spot. Progress and best times stay in the browser.
 
-### Unlock all levels (QA)
+Gold orbs are a Super Jump. Cyan orbs slow Ollie down for a few seconds.
 
-Type **`ollie`** anywhere, or enter it in the **Level code** box on Choose Level. That unlocks every stage and saves in this browser. `?unlock=1` on the URL does the same.
-
-## What this edition finishes
-
-- 8 complete stages (the Unity project had several unfinished scenes)
-- Original rules: coins, door lock, speed pads, jump pads, teleporters, moving platforms
-- Original Ollie face, splash art, and sound effects
-- Keyboard + touch so it can ship on the web now and as an iPhone app later
-- Level unlocks and best times saved in the browser
-- Pause with music / SFX / graphics quality (the old Escape menu)
-
-Unity bugs that were also fixed in the original C# (for archival completeness):
-
-- `GameManager.Updata` never ran; renamed to `Update` so the X-to-menu key works in Unity 4
-- “Procced” typos on the win / door prompts
-
-## iPhone later (Capacitor)
-
-This folder is already a Capacitor web dir (`capacitor.config.json`). When you are ready:
-
-```bash
-npm install @capacitor/core @capacitor/cli @capacitor/ios
-npx cap add ios
-npx cap copy ios
-npx cap open ios
-```
-
-Then archive from Xcode with an Apple Developer account. The page is already a standalone web app (Add to Home Screen) via `manifest.json`.
-
-## Why not Unity WebGL?
-
-Unity 4.5 cannot export WebGL. Getting there would mean upgrading through Unity 5 → 2017 (UnityScript removal) → a current editor, then rewriting every `rigidbody` / `audio` / `Application.LoadLevel` shortcut and rebuilding 8 binary scenes. The gameplay is a marble coin-hunt, so a Three.js + cannon-es remake is the reliable way to ship on the web and, later, wrap for iOS.
+Type **ollie** anywhere, or enter it as the secret on Choose Level, to open every stage.

@@ -92,6 +92,8 @@ canvas#gl {
 
 .menu-panel {
   width: min(420px, 100%);
+  max-height: calc(100dvh - 36px - var(--safe-top) - var(--safe-bottom));
+  overflow: auto;
   background: var(--panel);
   border: 2px solid var(--line);
   border-radius: 28px;
