@@ -1,19 +1,19 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { GameAudio } from "./audio.js";
-import { LEVELS, SHOWCASE } from "./levels.js";
+import { LEVELS, SHOWCASE } from "./levels.js?v=8";
 
 const BALL_R = 0.45;
 const SAVE_KEY = "ollie-the-ball-v1";
 const STEP = 1 / 60;
-const ROLL_FORCE = 11;
-const AIR_FORCE = 5;
-const JUMP_V = 8.2;
-const SUPER_JUMP_V = 15.6;
-const MAX_SPEED = 4.5;
-const SLOW_MAX = 2.6;
-const ROLL_DAMP = 0.52;
-const SLOW_DAMP = 0.8;
+const ROLL_FORCE = 9;
+const AIR_FORCE = 4.4;
+const JUMP_V = 7.8;
+const SUPER_JUMP_V = 14.6;
+const MAX_SPEED = 3.2;
+const SLOW_MAX = 1.9;
+const ROLL_DAMP = 0.58;
+const SLOW_DAMP = 0.84;
 const SLOW_TIME = 5;
 
 const $ = (id) => document.getElementById(id);
@@ -137,6 +137,7 @@ export class Game {
     this.safeHold = 0;
     this.respawnLock = 0;
     this.sparks = [];
+    this.sway = [];
 
     this.canvas = $("gl");
     this.renderer = null;
@@ -215,6 +216,10 @@ export class Game {
         this.audio.play("selectDown", { volume: 0.7 });
         this.onAction(btn.dataset.action);
       });
+    });
+    document.querySelectorAll("a.donate").forEach((link) => {
+      link.addEventListener("mouseenter", () => this.audio.play("select", { volume: 0.4 }));
+      link.addEventListener("click", () => this.audio.play("selectDown", { volume: 0.55 }));
     });
     $("btn-pause").addEventListener("click", () => this.setPaused(true));
     const queueJump = (e) => {
@@ -468,6 +473,13 @@ export class Game {
       roughness: 0.28,
       metalness: 0.4,
     });
+    this.mats.window = new THREE.MeshStandardMaterial({
+      color: 0xffe7a0,
+      emissive: 0xffb03a,
+      emissiveIntensity: 0.55,
+      roughness: 0.22,
+      metalness: 0.04,
+    });
   }
 
   newPhysics() {
@@ -510,6 +522,7 @@ export class Game {
     this.pickups = [];
     this.sparks.forEach((s) => this.scene.remove(s.mesh));
     this.sparks = [];
+    this.sway = [];
     this.door = null;
     this.player = null;
     this.playerBody = null;
@@ -710,17 +723,19 @@ export class Game {
     const g = new THREE.Group();
     g.position.set(d.pos[0], d.pos[1], d.pos[2]);
     if (d.type === "tree") {
+      const sc = d.scale || 1;
       const trunk = new THREE.Mesh(this.geos.cyl, this.mats.bark);
-      trunk.scale.set(0.28, 1.6, 0.28);
-      trunk.position.y = 0.8;
+      trunk.scale.set(0.28 * sc, 1.6 * sc, 0.28 * sc);
+      trunk.position.y = 0.8 * sc;
       const leaf = new THREE.Mesh(this.geos.cone, this.mats.leaf);
-      leaf.scale.set(1.4, 2.4, 1.4);
-      leaf.position.y = 2.4;
+      leaf.scale.set(1.4 * sc, 2.4 * sc, 1.4 * sc);
+      leaf.position.y = 2.4 * sc;
       const leaf2 = leaf.clone();
-      leaf2.scale.set(1.1, 1.8, 1.1);
-      leaf2.position.y = 3.3;
+      leaf2.scale.set(1.1 * sc, 1.8 * sc, 1.1 * sc);
+      leaf2.position.y = 3.3 * sc;
       g.add(trunk, leaf, leaf2);
-      this.boxMesh([0.8, 3.2, 0.8], "wood", [d.pos[0], d.pos[1] + 1.4, d.pos[2]], { visible: false });
+      this.rememberSway(g, d);
+      this.boxMesh([0.8 * sc, 3.2 * sc, 0.8 * sc], "wood", [d.pos[0], d.pos[1] + 1.4 * sc, d.pos[2]], { visible: false });
     } else if (d.type === "crate") {
       const m = new THREE.Mesh(this.geos.box, this.mats.crate);
       m.scale.set(1.1, 1.1, 1.1);
@@ -767,6 +782,7 @@ export class Game {
       b.scale.set(1.15 * sc, 1.7 * sc, 1.15 * sc);
       b.position.y = 3.2 * sc;
       g.add(trunk, a, b);
+      this.rememberSway(g, d);
       this.boxMesh([0.7 * sc, 3.4 * sc, 0.7 * sc], "wood", [d.pos[0], d.pos[1] + 1.5 * sc, d.pos[2]], { visible: false });
     } else if (d.type === "hut") {
       const body = new THREE.Mesh(this.geos.box, this.mats.wood);
@@ -811,6 +827,9 @@ export class Game {
       g.add(m);
       this.boxMesh([d.len || 3.4, 1.6, 1.5], "crate", d.pos);
       return;
+    } else if (d.type === "building") {
+      this.makeBuilding(d);
+      return;
     }
     g.traverse((o) => {
       if (o.isMesh) {
@@ -819,6 +838,90 @@ export class Game {
       }
     });
     this.addMesh(g);
+  }
+
+  rememberSway(g, d) {
+    g.userData.sway = 0.028;
+    g.userData.phase = d.pos[0] * 0.37 + d.pos[2] * 0.21;
+    this.sway.push(g);
+  }
+
+  makeBuilding(d) {
+    const g = new THREE.Group();
+    const w = d.w || 3.4;
+    const h = d.h || 3.4;
+    const depth = d.d || 3;
+    const style = d.style || "cottage";
+    const wall = style === "cottage" ? this.mats.wood : style === "ruin" ? this.mats.stone : this.mats.brick;
+    const bodyH = style === "ruin" ? h * 0.72 : h;
+    const body = new THREE.Mesh(this.geos.box, wall);
+    body.scale.set(w, bodyH, depth);
+    body.position.y = bodyH / 2;
+    g.add(body);
+
+    if (style === "cottage") {
+      const roof = new THREE.Mesh(this.geos.cone, this.mats.roof);
+      roof.scale.set(w * 0.78, 1.7, depth * 0.78);
+      roof.position.y = bodyH + 0.7;
+      const chim = new THREE.Mesh(this.geos.cyl, this.mats.brick);
+      chim.scale.set(0.28, 1.15, 0.28);
+      chim.position.set(w * 0.22, bodyH + 1.15, -depth * 0.16);
+      g.add(roof, chim);
+    } else if (style === "spire") {
+      const roof = new THREE.Mesh(this.geos.cone, this.mats.roof);
+      roof.scale.set(w * 0.85, h * 0.42, depth * 0.85);
+      roof.position.y = bodyH + h * 0.18;
+      g.add(roof);
+    } else if (style === "block") {
+      const roof = new THREE.Mesh(this.geos.box, this.mats.concrete || this.mats.stone);
+      roof.scale.set(w + 0.45, 0.35, depth + 0.45);
+      roof.position.y = bodyH + 0.18;
+      const band = new THREE.Mesh(this.geos.box, this.mats.stone);
+      band.scale.set(w + 0.08, 0.18, depth + 0.08);
+      band.position.y = bodyH * 0.52;
+      g.add(roof, band);
+    } else {
+      const stub = new THREE.Mesh(this.geos.box, this.mats.stone);
+      stub.scale.set(w * 0.42, h * 0.38, depth * 0.92);
+      stub.position.set(-w * 0.18, bodyH + h * 0.16, 0);
+      g.add(stub);
+    }
+
+    const door = new THREE.Mesh(this.geos.box, this.mats.bark);
+    door.scale.set(Math.min(0.72, w * 0.28), Math.min(1.35, bodyH * 0.42), 0.08);
+    door.position.set(0, door.scale.y / 2, depth / 2 + 0.04);
+    g.add(door);
+
+    const addWin = (x, y) => {
+      const win = new THREE.Mesh(this.geos.box, this.mats.window);
+      win.scale.set(0.42, 0.55, 0.06);
+      win.position.set(x, y, depth / 2 + 0.05);
+      g.add(win);
+    };
+    if (style === "block" || style === "spire") {
+      addWin(-w * 0.22, bodyH * 0.72);
+      addWin(w * 0.22, bodyH * 0.72);
+      if (style === "block" && bodyH > 4) {
+        addWin(-w * 0.22, bodyH * 0.38);
+        addWin(w * 0.22, bodyH * 0.38);
+      }
+    } else if (style === "cottage") {
+      addWin(-w * 0.24, bodyH * 0.62);
+      addWin(w * 0.24, bodyH * 0.62);
+    } else {
+      addWin(w * 0.16, bodyH * 0.55);
+    }
+
+    g.position.set(d.pos[0], d.pos[1], d.pos[2]);
+    g.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    this.addMesh(g);
+    const colH = style === "spire" ? bodyH + h * 0.22 : bodyH;
+    this.boxMesh([w * 0.92, colH, depth * 0.92], "brick", [d.pos[0], d.pos[1] + colH / 2, d.pos[2]], { visible: false });
   }
 
   makeSkill(s) {
@@ -1390,15 +1493,15 @@ export class Game {
 
     const target = this.player ? this.player.position.clone() : new THREE.Vector3();
     if (this.mode === "play" && this.playerBody) {
-      target.x += this.playerBody.velocity.x * 0.16;
-      target.z += this.playerBody.velocity.z * 0.16;
+      target.x += this.playerBody.velocity.x * 0.22;
+      target.z += this.playerBody.velocity.z * 0.22;
     }
     const cp = Math.cos(this.camPitch);
     const ox = Math.sin(this.camYaw) * cp * this.camDist;
     const oz = Math.cos(this.camYaw) * cp * this.camDist;
     const oy = Math.sin(this.camPitch) * this.camDist + 1.2;
     const desired = this.tmp.set(target.x + ox, target.y + oy, target.z + oz);
-    this.camera.position.lerp(desired, this.mode === "menu" ? 0.04 : 0.12);
+    this.camera.position.lerp(desired, this.mode === "menu" ? 0.04 : 0.18);
     this.camera.lookAt(target.x, target.y + 0.6, target.z);
     this.sun.position.set(target.x + 16, target.y + 26, target.z + 10);
     this.sun.target.position.copy(target);
@@ -1425,6 +1528,14 @@ export class Game {
     for (const tp of this.teleporters) {
       tp.ringA.rotation.y = t * 1.6;
       tp.ringB.rotation.y = -t * 1.6;
+    }
+    for (const g of this.sway) {
+      const a = Math.sin(t * 1.25 + g.userData.phase) * g.userData.sway;
+      g.rotation.z = a;
+      g.rotation.x = a * 0.45;
+    }
+    if (this.mats.window) {
+      this.mats.window.emissiveIntensity = 0.42 + Math.sin(t * 2.1) * 0.16;
     }
     if (this.rain) {
       const arr = this.rain.geometry.attributes.position.array;
