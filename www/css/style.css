@@ -75,6 +75,13 @@ canvas#gl {
   background: linear-gradient(180deg, rgba(10, 30, 55, 0.15) 0%, rgba(10, 30, 55, 0.72) 100%);
 }
 .splash-copy { position: relative; z-index: 1; }
+.splash-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.splash-actions .btn { min-width: min(240px, 80vw); }
 .splash-copy h1 {
   font-size: clamp(2.1rem, 6vw, 4rem);
   line-height: 0.95;
@@ -143,6 +150,24 @@ canvas#gl {
   color: #3a2500;
   border-color: #fff6c2;
   box-shadow: 0 4px 0 #b07a00;
+}
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
+}
+.menu-nav a.btn { width: 100%; }
+.btn.donate {
+  background: linear-gradient(#fff6c8, #ffc83a);
+  color: #4a2a00;
+  border-color: #fff3b0;
+  box-shadow: 0 4px 0 #b07a00;
+}
+.btn.donate:focus-visible {
+  outline: 3px solid #fff8dc;
+  outline-offset: 3px;
 }
 
 .level-grid {
